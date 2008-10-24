@@ -207,6 +207,11 @@ jackctl_disconnect_ports_by_connection_id(
 	jackctl_server server,
 	const char * connection_id);
 
+int
+jackctl_get_client_pid(
+	jackctl_server server,
+	const char * name);
+
 #if 0
 { /* Adjust editor indent */
 #endif

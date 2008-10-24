@@ -138,6 +138,7 @@ struct jackctl_client
 {
 	uint64_t id;
 	char * name;
+	pid_t pid;
 	JSList * ports;
 	void * patchbay_context;
 };
@@ -863,7 +864,8 @@ struct jackctl_client *
 jackctl_find_or_create_client(
 	struct jackctl_server * server_ptr,
 	const char * client_name, /* not '\0' terminated */
-	size_t client_name_len)	/* without terminating '\0' */
+	size_t client_name_len,	/* without terminating '\0' */
+	pid_t pid)
 {
 	struct jackctl_client * client_ptr;
 
@@ -896,6 +898,8 @@ jackctl_find_or_create_client(
 	client_ptr->ports = NULL;
 
 	client_ptr->id = server_ptr->next_client_id++;
+
+	client_ptr->pid = pid;
 
 	server_ptr->clients = jack_slist_append(server_ptr->clients, client_ptr);
 
@@ -1261,10 +1265,24 @@ jackctl_port_registration_notify(
 	struct jackctl_client * client_ptr;
 	const char * port_short_name;
 	struct jackctl_port * port_ptr;
+	jack_client_id_t client_id;
+	jack_client_internal_t * client;
+	pid_t pid;
 
 /* 	jack_info("jackctl_port_registration_notify() called."); */
 
 	port_full_name = server_ptr->engine->control->ports[port_id].name;
+
+	client_id = server_ptr->engine->control->ports[port_id].id;
+	client = jack_client_internal_by_id(server_ptr->engine, client_id);
+	if (client != NULL)
+	{
+		pid = client->control->pid;
+	}
+	else
+	{
+		pid = 0;
+	}
 
 	port_short_name = strchr(port_full_name, ':');
 	if (port_short_name == NULL)
@@ -1279,7 +1297,7 @@ jackctl_port_registration_notify(
 	{
 		/* appearing port */
 
-		client_ptr = jackctl_find_or_create_client(server_ptr, port_full_name, port_short_name - port_full_name - 1);
+		client_ptr = jackctl_find_or_create_client(server_ptr, port_full_name, port_short_name - port_full_name - 1, pid);
 		if (client_ptr == NULL)
 		{
 			jack_error("Creation of new jackctl client failed.");
@@ -1613,6 +1631,22 @@ fail_delete_engine:
 
 fail:
 	return false;
+}
+
+int
+jackctl_get_client_pid(
+	jackctl_server server,
+	const char * name)
+{
+	struct jackctl_client * client_ptr;
+
+	client_ptr = jackctl_find_client(server_ptr, name, strlen(name));
+	if (client_ptr == NULL)
+	{
+		return 0;
+	}
+
+	return client_ptr->pid;
 }
 
 #undef server_ptr

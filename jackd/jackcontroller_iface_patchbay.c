@@ -45,6 +45,7 @@ struct jack_graph_client
 {
 	uint64_t id;
 	char * name;
+	int pid;
 	struct list_head siblings;
 	struct list_head ports;
 };
@@ -294,6 +295,27 @@ jack_controller_patchbay_send_signal_ports_disconnected(
 		DBUS_TYPE_INVALID);
 }
 
+static
+struct jack_graph_client *
+jack_controller_patchbay_find_client_by_id(
+    struct jack_controller_patchbay *patchbay_ptr,
+    uint64_t id)
+{
+    struct list_head *node_ptr;
+    struct jack_graph_client *client_ptr;
+
+    list_for_each(node_ptr, &patchbay_ptr->graph.clients)
+    {
+        client_ptr = list_entry(node_ptr, struct jack_graph_client, siblings);
+        if (client_ptr->id == id)
+        {
+            return client_ptr;
+        }
+    }
+
+    return NULL;
+}
+
 #define patchbay_ptr ((struct jack_controller_patchbay *)((struct jack_controller *)server_context)->patchbay_context)
 
 void *
@@ -322,6 +344,9 @@ jack_controller_patchbay_client_appeared_callback(
 
 	client_ptr->id = client_id;
 	INIT_LIST_HEAD(&client_ptr->ports);
+
+	client_ptr->pid = jackctl_get_client_pid(server_context, client_ptr->name);
+	jack_info("New client '%s' with PID %d", client_ptr->name, client_ptr->pid);
 
 	pthread_mutex_lock(&patchbay_ptr->lock);
 	list_add_tail(&client_ptr->siblings, &patchbay_ptr->graph.clients);
@@ -1047,6 +1072,46 @@ jack_controller_dbus_disconnect_ports_by_connection_id(
 		"This method is not implemented yet");
 }
 
+static
+void
+jack_controller_dbus_get_client_pid(
+    struct jack_dbus_method_call * call)
+{
+    dbus_uint64_t client_id;
+    struct jack_graph_client *client_ptr;
+    message_arg_t arg;
+
+/*     jack_info("jack_controller_dbus_get_client_pid() called."); */
+
+    if (!jack_dbus_get_method_args(
+            call,
+            DBUS_TYPE_UINT64,
+            &client_id,
+            DBUS_TYPE_INVALID))
+    {
+        /* The method call had invalid arguments meaning that
+         * jack_dbus_get_method_args() has constructed an error for us.
+         */
+        return;
+    }
+
+    pthread_mutex_lock(&patchbay_ptr->lock);
+
+    client_ptr = jack_controller_patchbay_find_client_by_id(patchbay_ptr, client_id);
+    if (client_ptr == NULL)
+    {
+        jack_dbus_error(call, JACK_DBUS_ERROR_INVALID_ARGS, "cannot find client %" PRIu64, client_id);
+        goto unlock;
+    }
+
+    arg.int64 = client_ptr->pid;
+
+    jack_dbus_construct_method_return_single(call, DBUS_TYPE_INT64, arg);
+
+unlock:
+    pthread_mutex_unlock(&patchbay_ptr->lock);
+}
+
 #undef controller_ptr
 
 void
@@ -1099,6 +1164,10 @@ JACK_DBUS_METHOD_ARGUMENTS_BEGIN(DisconnectPortsByConnectionID)
 	JACK_DBUS_METHOD_ARGUMENT("connection_id", DBUS_TYPE_UINT64_AS_STRING, false)
 JACK_DBUS_METHOD_ARGUMENTS_END
 
+JACK_DBUS_METHOD_ARGUMENTS_BEGIN(GetClientPID)
+    JACK_DBUS_METHOD_ARGUMENT("client_id", DBUS_TYPE_INT64_AS_STRING, false)
+JACK_DBUS_METHOD_ARGUMENTS_END
+
 static
 const struct jack_dbus_interface_method_descriptor g_jack_controller_patchbay_iface_methods[] =
 {
@@ -1109,6 +1178,7 @@ const struct jack_dbus_interface_method_descriptor g_jack_controller_patchbay_if
 	JACK_DBUS_METHOD_DESCRIBE(DisconnectPortsByName, jack_controller_dbus_disconnect_ports_by_name)
 	JACK_DBUS_METHOD_DESCRIBE(DisconnectPortsByID, jack_controller_dbus_disconnect_ports_by_id)
 	JACK_DBUS_METHOD_DESCRIBE(DisconnectPortsByConnectionID, jack_controller_dbus_disconnect_ports_by_connection_id)
+	JACK_DBUS_METHOD_DESCRIBE(GetClientPID, jack_controller_dbus_get_client_pid)
 	JACK_DBUS_METHOD_DESCRIBE_END
 };
 
