@@ -27,12 +27,14 @@
 
 //#define DISABLE_SIGNAL_MAGIC
 
-#define JACKDBUS_DIR "/.jackdbus"
+#define DEFAULT_XDG_CONFIG "/.config"
+#define DEFAULT_XDG_LOG "/.log"
+#define JACKDBUS_DIR "/jack"
 #define JACKDBUS_LOG "/jackdbus.log"
 #define JACKDBUS_CONF "/conf.xml"
 
-extern char *g_jackdbus_dir;
-extern size_t g_jackdbus_dir_len; /* without terminating '\0' char */
+extern char *g_jackdbus_config_dir;
+extern size_t g_jackdbus_config_dir_len; /* without terminating '\0' char */
 extern int g_exit_command;
 
 bool

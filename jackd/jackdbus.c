@@ -2,6 +2,7 @@
 /*
     Copyright (C) 2007,2008 Nedko Arnaudov
     Copyright (C) 2007-2008 Juuso Alasuutari
+    Copyright (C) 2008 Marc-Olivier Barre
     
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,8 +34,10 @@
 #include "jackcontroller.h"
 
 FILE *g_logfile;
-char *g_jackdbus_dir;
-size_t g_jackdbus_dir_len; /* without terminating '\0' char */
+char *g_jackdbus_config_dir;
+size_t g_jackdbus_config_dir_len; /* without terminating '\0' char */
+char *g_jackdbus_log_dir;
+size_t g_jackdbus_log_dir_len; /* without terminating '\0' char */
 int g_exit_command;
 DBusConnection *g_connection;
 
@@ -513,113 +516,154 @@ jack_dbus_error_callback(const char *msg)
 	fflush(g_logfile);
 }
 
-int
+bool
+ensure_dir_exist(const char *dirname, int mode)
+{
+    struct stat st;
+    if (stat(dirname, &st) != 0)
+    {
+        if (errno == ENOENT)
+        {
+            printf("Directory \"%s\" does not exist. Creating...\n", dirname);
+            if (mkdir(dirname, mode) != 0)
+            {
+                fprintf(stderr, "Failed to create \"%s\" directory: %d (%s)\n", dirname, errno, strerror(errno));
+                return false;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "Failed to stat \"%s\": %d (%s)\n", dirname, errno, strerror(errno));
+            return false;
+        }
+    }
+    else
+    {
+        if (!S_ISDIR(st.st_mode))
+        {
+            fprintf(stderr, "\"%s\" exists but is not directory.\n", dirname);
+            return false;
+        }
+    }
+    return true;
+}
+
+char *
+pathname_cat(const char *pathname_a, const char *pathname_b)
+{
+    char *pathname;
+    int pathname_a_len, pathname_b_len, pathname_len;
+    pathname_a_len = strlen(pathname_a);
+    pathname_b_len = strlen(pathname_b);
+    pathname = malloc(pathname_a_len + pathname_b_len + 1);
+    if (pathname == NULL)
+    {
+        fprintf(stderr, "Out of memory\n");
+        return NULL;
+    }
+    memcpy(pathname, pathname_a, pathname_a_len);
+    memcpy(pathname + pathname_a_len, pathname_b, pathname_b_len);
+    pathname_len = pathname_a_len + pathname_b_len;
+    pathname[pathname_len] = 0;
+    return pathname;
+}
+
+bool
 paths_init()
 {
-	const char *home_dir;
-	struct stat st;
-	size_t home_dir_len;
-	size_t jackdbus_dir_len;
-	
-	home_dir = getenv("HOME");
-	if (home_dir == NULL)
+	const char *home_dir, *xdg_config_home, *xdg_log_home;
+    
+    home_dir = getenv("HOME");
+    if (home_dir == NULL)
+    {
+        fprintf(stderr, "Environment variable HOME not set\n");
+        goto fail;
+    }
+
+	xdg_config_home = getenv("XDG_CONFIG_HOME");
+	if (xdg_config_home == NULL)
 	{
-		fprintf(stderr, "Environment variable HOME not set\n");
-		goto fail;
+	    if (!(xdg_config_home = pathname_cat(home_dir, DEFAULT_XDG_CONFIG))) goto fail;
 	}
 
-	home_dir_len = strlen(home_dir);
-	jackdbus_dir_len = strlen(JACKDBUS_DIR);
+    if (!(xdg_log_home = pathname_cat(home_dir, DEFAULT_XDG_LOG))) goto fail;
 
-	g_jackdbus_dir = malloc(home_dir_len + jackdbus_dir_len + 1);
-	if (g_jackdbus_dir == NULL)
-	{
-		fprintf(stderr, "Out of memory\n");
-		goto fail;
-	}
+	if (!(g_jackdbus_config_dir = pathname_cat(xdg_config_home, JACKDBUS_DIR))) goto fail;
+	if (!(g_jackdbus_log_dir = pathname_cat(xdg_log_home, JACKDBUS_DIR))) goto fail;
 
-	memcpy(g_jackdbus_dir, home_dir, home_dir_len);
-	memcpy(g_jackdbus_dir + home_dir_len, JACKDBUS_DIR, jackdbus_dir_len);
-	g_jackdbus_dir_len = home_dir_len + jackdbus_dir_len;
-	g_jackdbus_dir[g_jackdbus_dir_len] = 0;
+    if (!ensure_dir_exist(xdg_config_home, 0700))
+    {
+        goto fail;
+    }
+    
+    if (!ensure_dir_exist(xdg_log_home, 0700))
+    {
+        goto fail;
+    }
 
-	if (stat(g_jackdbus_dir, &st) != 0)
-	{
-		if (errno == ENOENT)
-		{
-			printf("Directory \"%s\" does not exist. Creating...\n", g_jackdbus_dir);
-			if (mkdir(g_jackdbus_dir, 0777) != 0)
-			{
-				fprintf(stderr, "Failed to create \"%s\" directory: %d (%s)\n", g_jackdbus_dir, errno, strerror(errno));
-				goto fail_free;
-			}
-		}
-		else
-		{
-			fprintf(stderr, "Failed to stat \"%s\": %d (%s)\n", g_jackdbus_dir, errno, strerror(errno));
-			goto fail_free;
-		}
-	}
-	else
-	{
-		if (!S_ISDIR(st.st_mode))
-		{
-			fprintf(stderr, "\"%s\" exists but is not directory.\n", g_jackdbus_dir);
-			goto fail_free;
-		}
-	}
+    if (!ensure_dir_exist(g_jackdbus_config_dir, 0700))
+    {
+        free(g_jackdbus_config_dir);
+        goto fail;
+    }
+    g_jackdbus_config_dir_len = strlen(g_jackdbus_config_dir);
+    
+    if (!ensure_dir_exist(g_jackdbus_log_dir, 0700))
+    {
+        free(g_jackdbus_log_dir);
+        goto fail;
+    }
+    g_jackdbus_log_dir_len = strlen(g_jackdbus_log_dir);
 
-	return TRUE;
-
-fail_free:
-	free(g_jackdbus_dir);
+    return true;
 
 fail:
-	return FALSE;
+    return false;
 }
 
 void
 paths_uninit()
 {
-	free(g_jackdbus_dir);
+    free(g_jackdbus_config_dir);
+    free(g_jackdbus_log_dir);
 }
 
 int
 log_init()
 {
-	char *log_filename;
-	size_t log_len;
+    char *log_filename;
+    size_t log_len;
 
-	log_len = strlen(JACKDBUS_LOG);
+    log_len = strlen(JACKDBUS_LOG);
 
-	log_filename = malloc(g_jackdbus_dir_len + log_len + 1);
-	if (log_filename == NULL)
-	{
-		fprintf(stderr, "Out of memory\n");
-		return FALSE;
-	}
+    log_filename = malloc(g_jackdbus_log_dir_len + log_len + 1);
+    if (log_filename == NULL)
+    {
+        fprintf(stderr, "Out of memory\n");
+        return FALSE;
+    }
 
-	memcpy(log_filename, g_jackdbus_dir, g_jackdbus_dir_len);
-	memcpy(log_filename + g_jackdbus_dir_len, JACKDBUS_LOG, log_len);
-	log_filename[g_jackdbus_dir_len + log_len] = 0;
+    memcpy(log_filename, g_jackdbus_log_dir, g_jackdbus_log_dir_len);
+    memcpy(log_filename + g_jackdbus_log_dir_len, JACKDBUS_LOG, log_len);
+    log_filename[g_jackdbus_log_dir_len + log_len] = 0;
 
-	g_logfile = fopen(log_filename, "a");
-	if (g_logfile == NULL)
-	{
-		fprintf(stderr, "Cannot open jackdbus log file \"%s\": %d (%s)\n", log_filename, errno, strerror(errno));
-		free(log_filename);
-		return FALSE;
-	}
+    g_logfile = fopen(log_filename, "a");
+    if (g_logfile == NULL)
+    {
+        fprintf(stderr, "Cannot open jackdbus log file \"%s\": %d (%s)\n", log_filename, errno, strerror(errno));
+        free(log_filename);
+        return FALSE;
+    }
 
-	free(log_filename);
+    free(log_filename);
 
-	return TRUE;
+    return TRUE;
 }
 
 void
 log_uninit()
 {
-	fclose(g_logfile);
+    fclose(g_logfile);
 }
 
 void

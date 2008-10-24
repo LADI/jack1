@@ -232,16 +232,16 @@ jack_controller_settings_save(
 
 	conf_len = strlen(JACKDBUS_CONF);
 
-	filename = malloc(g_jackdbus_dir_len + conf_len + 1);
+	filename = malloc(g_jackdbus_config_dir_len + conf_len + 1);
 	if (filename == NULL)
 	{
 		jack_error("Out of memory.");
 		goto fail;
 	}
 
-	memcpy(filename, g_jackdbus_dir, g_jackdbus_dir_len);
-	memcpy(filename + g_jackdbus_dir_len, JACKDBUS_CONF, conf_len);
-	filename[g_jackdbus_dir_len + conf_len] = 0;
+	memcpy(filename, g_jackdbus_config_dir, g_jackdbus_config_dir_len);
+	memcpy(filename + g_jackdbus_config_dir_len, JACKDBUS_CONF, conf_len);
+	filename[g_jackdbus_config_dir_len + conf_len] = 0;
 
 	jack_info("saving settings to \"%s\"", filename);
 
@@ -521,16 +521,16 @@ jack_controller_settings_load(
 
 	conf_len = strlen(JACKDBUS_CONF);
 
-	filename = malloc(g_jackdbus_dir_len + conf_len + 1);
+	filename = malloc(g_jackdbus_config_dir_len + conf_len + 1);
 	if (filename == NULL)
 	{
 		jack_error("Out of memory.");
 		goto exit;
 	}
 
-	memcpy(filename, g_jackdbus_dir, g_jackdbus_dir_len);
-	memcpy(filename + g_jackdbus_dir_len, JACKDBUS_CONF, conf_len);
-	filename[g_jackdbus_dir_len + conf_len] = 0;
+	memcpy(filename, g_jackdbus_config_dir, g_jackdbus_config_dir_len);
+	memcpy(filename + g_jackdbus_config_dir_len, JACKDBUS_CONF, conf_len);
+	filename[g_jackdbus_config_dir_len + conf_len] = 0;
 
 	jack_info("loading settings from \"%s\"", filename);
 
