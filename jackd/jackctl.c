@@ -32,6 +32,8 @@
 #include <jack/engine.h>
 #include <jack/driver.h>
 
+#include "../libjack/local.h"
+
 #include "jackctl.h"
 
 struct jackctl_server
@@ -1573,8 +1575,8 @@ jackctl_server_start(
 	}
 
 	server_ptr->xruns = 0;
-	server_ptr->engine->driver->internal_client->control->xrun = jackctl_xrun;
-	server_ptr->engine->driver->internal_client->control->xrun_arg = server_ptr;
+	server_ptr->engine->driver->internal_client->private_client->xrun = jackctl_xrun;
+	server_ptr->engine->driver->internal_client->private_client->xrun_arg = server_ptr;
 
 	if (server_ptr->engine->driver->start(server_ptr->engine->driver) != 0) {
 		jack_error("cannot start \"%s\" driver", driver_ptr->desc_ptr->name);
