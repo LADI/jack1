@@ -157,6 +157,10 @@ struct _jack_engine {
     int audio_in_cnt;
     int midi_out_cnt;
     int midi_in_cnt;
+
+    void (* jackctl_port_registration_notify)(void * jackctl_context, jack_port_id_t port_id, int yn);
+    void (* jackctl_connection_notify)(void * jackctl_context, jack_port_id_t port1_id, jack_port_id_t port2_id, int connected);
+    void * jackctl_context;
 };
 
 /* public functions */

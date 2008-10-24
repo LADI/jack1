@@ -27,3 +27,8 @@ rpm: dist
 	rpm -ta $(distdir).tar.gz
 
 dist-hook: dist-check-doxygen
+
+if HAVE_DBUS
+install-data-hook:
+	@if test "`ps h -C jackdbus`" ; then echo; echo; echo 'WARNING: jackdbus seems to be running, you may want to deactivate current service using "jack_control exit".'; echo; echo; fi
+endif

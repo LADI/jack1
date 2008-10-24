@@ -593,6 +593,43 @@ fi
 # PKG_CHECK_MODULES inside a --disable-whatever check, you need to
 # do it somewhere *below* this comment.
 
+AC_ARG_ENABLE(dbus, [  --disable-dbus          don't build D-Bus integration ],
+			TRY_DBUS=$enableval , TRY_DBUS=yes ) 
+HAVE_DBUS=false
+if test "x$TRY_DBUS" = "xyes"
+then
+	PKG_CHECK_MODULES(DBUS, dbus-1, [AC_DEFINE([HAVE_DBUS], 1, [Defined if D-Bus support needs to be built.]) HAVE_DBUS=true], [true])
+fi
+
+AM_CONDITIONAL(HAVE_DBUS, $HAVE_DBUS)
+
+AC_ARG_ENABLE(pkg-config-dbus-service-dir,
+	[  --enable-pkg-config-dbus-service-dir    force D-Bus service install dir to be one returned by pkg-config ],
+	DBUS_SERVICES_DIR_FORCE_REAL=$enableval , DBUS_SERVICES_DIR_FORCE_REAL=no ) 
+
+if test "x$HAVE_DBUS" = "xtrue"
+then
+	DBUS_SERVICES_DIR_REAL=`$PKG_CONFIG --variable=session_bus_services_dir dbus-1`
+	if test "x$DBUS_SERVICES_DIR_FORCE_REAL" = "xyes"
+	then
+		AC_MSG_WARN([overriding D-Bus service install dir])
+		DBUS_SERVICES_DIR="$DBUS_SERVICES_DIR_REAL"
+	else
+		AS_AC_EXPAND(DATADIR, $datadir)
+		DBUS_SERVICES_DIR="$DATADIR/dbus-1/services"
+	fi
+	AC_SUBST(DBUS_SERVICES_DIR)
+	AC_DEFINE_UNQUOTED(DBUS_SERVICES_DIR, "$DBUS_SERVICES_DIR", [Where services dir for DBUS is])
+fi
+
+HAVE_LIBXML2=false
+PKG_CHECK_MODULES(LIBXML2, libxml-2.0, [AC_DEFINE([HAVE_LIBXML2], 1, [Defined if libxml2 is present.]) HAVE_LIBXML2=true], [true])
+AM_CONDITIONAL(HAVE_LIBXML2, $HAVE_LIBXML2)
+
+AC_CHECK_LIB(expat, XML_ParserCreate_MM,
+             [ AC_CHECK_HEADERS(expat.h, HAVE_EXPAT=true, HAVE_EXPAT=false) ],
+             HAVE_EXPAT=false)
+
 # Check which backend drivers can be built.  The last one successfully
 # configured becomes the default JACK driver; so the order of
 # precedence is: alsa, sun, oss, coreaudio, portaudio, dummy.
@@ -749,6 +786,39 @@ AM_CONDITIONAL(HAVE_DOXYGEN, $HAVE_DOXYGEN)
 AM_CONDITIONAL(USE_CAPABILITIES, $USE_CAPABILITIES)
 AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
 
+SETTINGS_PERSISTENCE_WARNING=
+SETTINGS_PERSISTENCE_USE_LIBXML2=false
+SETTINGS_PERSISTENCE_USE_EXPAT=false
+SETTINGS_PERSISTENCE_DISABLED=true
+
+if test x$HAVE_EXPAT = xtrue
+then
+  SETTINGS_PERSISTENCE=expat
+  SETTINGS_PERSISTENCE_USE_EXPAT=true
+  SETTINGS_PERSISTENCE_DISABLED=false
+  AC_DEFINE_UNQUOTED(SETTINGS_PERSISTENCE_USE_EXPAT, 1, [Whether expat is used as settings persistence backend])
+else
+  if test x$HAVE_LIBXML2 = xtrue
+  then
+    if test x$HAVE_FIREWIRE = xtrue
+    then
+      SETTINGS_PERSISTENCE=no
+      SETTINGS_PERSISTENCE_WARNING="libxml2 usage is incompatible with FireWire (FFADO) driver. If you want settings persistence, install expat or disable FireWire (FFADO) driver."
+    else
+      SETTINGS_PERSISTENCE=libxml2
+      SETTINGS_PERSISTENCE_USE_LIBXML2=true
+      SETTINGS_PERSISTENCE_DISABLED=false
+      AC_DEFINE_UNQUOTED(SETTINGS_PERSISTENCE_USE_LIBXML2, 1, [Whether libxml2 is used as settings persistence backend])
+    fi
+  else
+    SETTINGS_PERSISTENCE=no
+  fi
+fi
+
+AM_CONDITIONAL(SETTINGS_PERSISTENCE_USE_LIBXML2, $SETTINGS_PERSISTENCE_USE_LIBXML2)
+AM_CONDITIONAL(SETTINGS_PERSISTENCE_USE_EXPAT, $SETTINGS_PERSISTENCE_USE_EXPAT)
+AM_CONDITIONAL(SETTINGS_PERSISTENCE_DISABLED, $SETTINGS_PERSISTENCE_DISABLED)
+
 AC_OUTPUT(
 Makefile
 config/Makefile
@@ -814,7 +884,28 @@ echo \|
 echo \| Default driver backend................................ : $JACK_DEFAULT_DRIVER
 echo \| Shared memory interface............................... : $JACK_SHM_TYPE
 echo \| IPC Temporary directory............................... : $DEFAULT_TMP_DIR
+echo \| D-Bus integration .................................... : $HAVE_DBUS
+dnl echo \| D-Bus CFLAGS ......................................... : $DBUS_CFLAGS
+dnl echo \| D-Bus LIBS ........................................... : $DBUS_LIBS
+if test "x$HAVE_DBUS" = "xtrue"
+then
+echo \| D-Bus service install dir............................. : $DBUS_SERVICES_DIR
+echo \| Settings persistence.................................. : $SETTINGS_PERSISTENCE
+fi
 echo \| Install prefix........................................ : $prefix
 echo \| Default tmp dir....................................... : $DEFAULT_TMP_DIR
 echo
 
+if test "x$HAVE_DBUS" = "xtrue" -a "x$DBUS_SERVICES_DIR_REAL" != "x$DBUS_SERVICES_DIR"
+then
+	AC_MSG_WARN([D-Bus session services directory as reported by pkg-config is $DBUS_SERVICES_DIR_REAL])
+	AC_MSG_WARN([but service file will be installed in $DBUS_SERVICES_DIR])
+	AC_MSG_WARN([You may need to adjust your D-Bus configuration after installing jackdbus])
+	AC_MSG_WARN([You can override dbus service install dir])
+	AC_MSG_WARN([with --enable-pkg-config-dbus-service-dir option to this script])
+fi
+
+if test "$SETTINGS_PERSISTENCE_WARNING"
+then
+	AC_MSG_WARN($SETTINGS_PERSISTENCE_WARNING)
+fi

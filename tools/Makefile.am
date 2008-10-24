@@ -52,6 +52,10 @@ bin_PROGRAMS = jack_load \
 	       $(JACK_TRANSPORT) \
 	       $(NETJACK_TOOLS)
 
+if HAVE_DBUS
+dist_bin_SCRIPTS = jack_control
+endif
+
 noinst_PROGRAMS = jack_thread_wait
 
 if HAVE_SNDFILE

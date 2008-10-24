@@ -31,12 +31,12 @@ lib_LTLIBRARIES	= libjack.la
 
 noinst_HEADERS	= local.h
 
-AM_CFLAGS = $(JACK_CFLAGS) -DJACK_LOCATION=\"$(bindir)\"
+AM_CFLAGS = $(JACK_CFLAGS) $(DBUS_CFLAGS) -DJACK_LOCATION=\"$(bindir)\"
 AM_CXXFLAGS = $(JACK_CFLAGS)
 
 libjack_la_CFLAGS = $(AM_CFLAGS)
 
 libjack_la_SOURCES = $(SOURCE_FILES)
-libjack_la_LIBADD  = simd.lo @OS_LDFLAGS@
+libjack_la_LIBADD  = simd.lo @OS_LDFLAGS@ $(DBUS_LIBS)
 libjack_la_LDFLAGS  = -export-dynamic -version-info @JACK_SO_VERSION@
-
+libjack_la_LIBS = $(DBUS_LIBS)

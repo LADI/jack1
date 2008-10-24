@@ -61,6 +61,10 @@
 #include <sysdeps/pThreadUtilities.h>
 #endif
 
+#if HAVE_DBUS
+#include <dbus/dbus.h>
+#endif
+
 static pthread_mutex_t client_lock;
 static pthread_cond_t  client_ready;
 
@@ -622,6 +626,50 @@ server_event_connect (jack_client_t *client, const char *server_name)
 	return fd;
 }
 
+#if HAVE_DBUS
+static void
+start_server_dbus()
+{
+	DBusError err;
+	DBusConnection *conn;
+	DBusMessage *msg;
+
+	// initialise the errors
+	dbus_error_init(&err);
+
+	// connect to the bus
+	conn = dbus_bus_get(DBUS_BUS_SESSION, &err);
+	if (dbus_error_is_set(&err)) {
+		fprintf(stderr, "Connection Error (%s)\n", err.message);
+		dbus_error_free(&err);
+	}
+	if (NULL == conn) {
+		exit(1);
+	}
+
+	msg = dbus_message_new_method_call(
+		"org.jackaudio.service",     // target for the method call
+		"/org/jackaudio/Controller", // object to call on
+		"org.jackaudio.JackControl", // interface to call on
+		"StartServer");              // method name
+	if (NULL == msg) {
+		fprintf(stderr, "Message Null\n");
+		exit(1);
+	}
+
+	// send message and get a handle for a reply
+	if (!dbus_connection_send(conn, msg, NULL))
+	{
+		fprintf(stderr, "Out Of Memory!\n");
+		exit(1);
+	}
+
+	dbus_message_unref(msg);
+	dbus_connection_flush(conn);
+	dbus_error_free(&err);
+}
+#endif
+
 /* Exec the JACK server in this process.  Does not return. */
 static void
 _start_server (const char *server_name)
@@ -801,6 +849,24 @@ jack_request_client (ClientType type,
 	
 	if ((*req_fd = server_connect (va->server_name)) < 0) {
 		int trys;
+#if HAVE_DBUS
+		if ((options & JackNoStartServer)
+		    || getenv("JACK_NO_START_SERVER")) {
+				*status |= (JackFailure|JackServerFailed);
+				goto fail;
+		}
+
+		start_server_dbus();
+		trys = 5;
+		do {
+			sleep(1);
+			if (--trys < 0) {
+				*status |= (JackFailure|JackServerFailed);
+				goto fail;
+			}
+		} while ((*req_fd = server_connect (va->server_name)) < 0);
+		*status |= JackServerStarted;
+#else
 		if (start_server(va->server_name, options)) {
 			*status |= (JackFailure|JackServerFailed);
 			goto fail;
@@ -814,6 +880,7 @@ jack_request_client (ClientType type,
 			}
 		} while ((*req_fd = server_connect (va->server_name)) < 0);
 		*status |= JackServerStarted;
+#endif
 	}
 
 	/* format connection request */

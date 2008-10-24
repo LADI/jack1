@@ -1,0 +1,4 @@
+ * Patchbay interface
+ * Transport interface
+ * Send signals to (control) apps (status changes, connections, clients, port renames, xruns, error and info logs)
+ * Implement configurator supporting multiple user configurations (separate D-Bus object)

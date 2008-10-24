@@ -21,10 +21,17 @@ endif
 
 bin_PROGRAMS = jackd $(CAP_PROGS)
 
-AM_CFLAGS = $(JACK_CFLAGS) -DJACK_LOCATION=\"$(bindir)\"
+if HAVE_DBUS
+bin_PROGRAMS += jackdbus
+endif
 
-jackd_SOURCES = jackd.c
-jackd_LDADD = libjackserver.la $(CAP_LIBS) @OS_LDFLAGS@
+AM_CFLAGS = $(JACK_CFLAGS) -DJACK_LOCATION=\"$(bindir)\" $(DBUS_CFLAGS) $(LIBXML2_CFLAGS)
+
+COMMON_SOURCES = engine.c clientengine.c transengine.c
+COMMON_LIBS = libjackserver.la $(CAP_LIBS) @OS_LDFLAGS@
+
+jackd_SOURCES = jackd.c $(COMMON_SOURCES)
+jackd_LDADD = $(COMMON_LIBS) $(DBUS_LIBS)
 
 noinst_HEADERS = jack_md5.h md5.h md5_loc.h \
 		 clientengine.h transengine.h
@@ -53,6 +60,43 @@ libjackserver_la_LDFLAGS  = -export-dynamic -version-info @JACK_SO_VERSION@
 
 man_MANS = jackd.1 jackstart.1
 EXTRA_DIST = $(man_MANS)
+
+if HAVE_DBUS
+noinst_HEADERS += jackdbus.h jackctl.h jackcontroller.h jackcontroller_xml.h jackcontroller_internal.h
+jackdbus_SOURCES = jackdbus.c jackctl.c $(COMMON_SOURCES) jackcontroller.c
+jackdbus_SOURCES += jackcontroller_iface_introspectable.c
+jackdbus_SOURCES += jackcontroller_iface_control.c
+jackdbus_SOURCES += jackcontroller_iface_configure.c
+jackdbus_SOURCES += jackcontroller_iface_patchbay.c
+jackdbus_SOURCES += jackcontroller_iface_transport.c
+jackdbus_LDADD = $(COMMON_LIBS) $(DBUS_LIBS)
+
+if SETTINGS_PERSISTENCE_USE_LIBXML2
+jackdbus_SOURCES += jackcontroller_xml_libxml.c jackcontroller_xml.c
+jackdbus_LDADD += $(LIBXML2_LIBS)
+endif
+
+if SETTINGS_PERSISTENCE_USE_EXPAT
+jackdbus_SOURCES += jackcontroller_xml_expat.c jackcontroller_xml.c jackcontroller_xml_write_raw.c
+jackdbus_LDADD += -lexpat
+endif
+
+if SETTINGS_PERSISTENCE_DISABLED
+jackdbus_SOURCES += jackcontroller_xml_nop.c
+endif
+
+# Dbus service file
+servicedir = $(DBUS_SERVICES_DIR)
+service_in_files = org.jackaudio.service.in
+service_DATA = $(service_in_files:.service.in=.service)
+
+# Rule to make the service file with bindir expanded
+$(service_DATA): $(service_in_files) Makefile
+	@sed -e "s|\@bindir\@|$(bindir)|" $< > $@
+
+EXTRA_DIST += $(service_in_files)
+
+endif
 
 dist-hook:
 	rm -f $(distdir)/jack_md5.h

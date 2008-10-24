@@ -87,10 +87,10 @@ static jack_port_internal_t *jack_get_port_by_name (jack_engine_t *,
 						    const char *name);
 static int  jack_rechain_graph (jack_engine_t *engine);
 static void jack_clear_fifos (jack_engine_t *engine);
-static int  jack_port_do_connect (jack_engine_t *engine,
+int  jack_port_do_connect (jack_engine_t *engine,
 				  const char *source_port,
 				  const char *destination_port);
-static int  jack_port_do_disconnect (jack_engine_t *engine,
+int  jack_port_do_disconnect (jack_engine_t *engine,
 				     const char *source_port,
 				     const char *destination_port);
 static int  jack_port_do_disconnect_all (jack_engine_t *engine,
@@ -1731,6 +1731,10 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	engine->midi_out_cnt = 0;
 	engine->midi_in_cnt = 0;
 
+	engine->jackctl_port_registration_notify = NULL;
+	engine->jackctl_connection_notify = NULL;
+	engine->jackctl_context = NULL;
+
 	jack_engine_reset_rolling_usecs (engine);
 	engine->max_usecs = 0.0f;
 
@@ -2421,6 +2425,11 @@ jack_notify_all_port_interested_clients (jack_engine_t *engine, jack_client_id_t
 			/* one of the ports belong to this client or it has a port connect callback */
 			jack_deliver_event (engine, client, &event);
 		} 
+	}
+
+	if (engine->jackctl_connection_notify != NULL)
+	{
+		engine->jackctl_connection_notify(engine->jackctl_context, a, b, connected);
 	}
 }
 
@@ -3177,7 +3186,7 @@ void jack_dump_configuration(jack_engine_t *engine, int take_lock)
 	jack_info("engine.c: <-- dump ends -->");
 }
 
-static int 
+int 
 jack_port_do_connect (jack_engine_t *engine,
 		       const char *source_port,
 		       const char *destination_port)
@@ -3507,7 +3516,7 @@ jack_port_do_disconnect_all (jack_engine_t *engine,
 	return 0;
 }
 
-static int 
+int 
 jack_port_do_disconnect (jack_engine_t *engine,
 			 const char *source_port,
 			 const char *destination_port)
@@ -4007,6 +4016,11 @@ jack_port_registration_notify (jack_engine_t *engine,
 					    strerror (errno));
 			}
 		}
+	}
+
+	if (engine->jackctl_port_registration_notify != NULL)
+	{
+		engine->jackctl_port_registration_notify(engine->jackctl_context, port_id, yn);
 	}
 }
 
