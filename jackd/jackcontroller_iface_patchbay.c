@@ -81,7 +81,7 @@ jack_controller_patchbay_init(
 {
 	struct jack_controller_patchbay * patchbay_ptr;
 
-	jack_info("jack_controller_patchbay_init() called");
+	//jack_info("jack_controller_patchbay_init() called");
 
 	patchbay_ptr = malloc(sizeof(struct jack_controller_patchbay));
 	if (patchbay_ptr == NULL)
@@ -1118,7 +1118,7 @@ void
 jack_controller_patchbay_uninit(
 	struct jack_controller * controller_ptr)
 {
-	jack_info("jack_controller_patchbay_uninit() called");
+	//jack_info("jack_controller_patchbay_uninit() called");
 
 	pthread_mutex_destroy(&patchbay_ptr->lock);
 }
