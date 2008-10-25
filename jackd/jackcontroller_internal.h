@@ -38,6 +38,7 @@ struct jack_controller
 
 	/* current driver, NULL if not driver is selected */
 	jackctl_driver driver;
+	bool driver_set;
 
 	struct jack_dbus_object_descriptor dbus_descriptor;
 };

@@ -1680,6 +1680,105 @@ const char * jackctl_parameter_get_long_description(jackctl_parameter parameter)
 	return parameter_ptr->long_description;
 }
 
+bool jackctl_parameter_has_range_constraint(jackctl_parameter parameter)
+{
+    return false;
+    //return parameter_ptr->constraint_ptr != NULL && (parameter_ptr->constraint_ptr->flags & JACK_CONSTRAINT_FLAG_RANGE) != 0;
+}
+
+bool jackctl_parameter_has_enum_constraint(jackctl_parameter parameter)
+{
+    return false;
+    //return parameter_ptr->constraint_ptr != NULL && (parameter_ptr->constraint_ptr->flags & JACK_CONSTRAINT_FLAG_RANGE) == 0;
+}
+
+uint32_t jackctl_parameter_get_enum_constraints_count(jackctl_parameter parameter)
+{
+#if 0
+    if (!jackctl_parameter_has_enum_constraint(parameter_ptr))
+    {
+        return 0;
+    }
+
+    return parameter_ptr->constraint_ptr->constraint.enumeration.count;
+#else
+    return 0;
+#endif
+}
+
+union jackctl_parameter_value jackctl_parameter_get_enum_constraint_value(jackctl_parameter parameter, uint32_t index)
+{
+    //jack_driver_param_value_t * value_ptr;
+    union jackctl_parameter_value jackctl_value;
+
+#if 0
+    value_ptr = &parameter_ptr->constraint_ptr->constraint.enumeration.possible_values_array[index].value;
+
+    switch (parameter_ptr->type)
+    {
+    case JackParamInt:
+        jackctl_value.i = value_ptr->i;
+        break;
+    case JackParamUInt:
+        jackctl_value.ui = value_ptr->ui;
+        break;
+    case JackParamChar:
+        jackctl_value.c = value_ptr->c;
+        break;
+    case JackParamString:
+        strcpy(jackctl_value.str, value_ptr->str);
+        break;
+    default:
+#endif
+        jack_error("bad driver parameter type %i (enum constraint)", (int)parameter_ptr->type);
+        assert(0);
+#if 0
+    }
+#endif
+
+    return jackctl_value;
+}
+
+const char * jackctl_parameter_get_enum_constraint_description(jackctl_parameter parameter, uint32_t index)
+{
+    return "???";
+    //return parameter_ptr->constraint_ptr->constraint.enumeration.possible_values_array[index].short_desc;
+}
+
+void jackctl_parameter_get_range_constraint(jackctl_parameter parameter, union jackctl_parameter_value * min_ptr, union jackctl_parameter_value * max_ptr)
+{
+#if 0
+    switch (parameter_ptr->type)
+    {
+    case JackParamInt:
+        min_ptr->i = parameter_ptr->constraint_ptr->constraint.range.min.i;
+        max_ptr->i = parameter_ptr->constraint_ptr->constraint.range.max.i;
+        return;
+    case JackParamUInt:
+        min_ptr->ui = parameter_ptr->constraint_ptr->constraint.range.min.ui;
+        max_ptr->ui = parameter_ptr->constraint_ptr->constraint.range.max.ui;
+        return;
+    default:
+#endif
+        jack_error("bad driver parameter type %i (range constraint)", (int)parameter_ptr->type);
+        assert(0);
+#if 0
+    }
+#endif
+}
+
+bool jackctl_parameter_constraint_is_strict(jackctl_parameter parameter)
+{
+    return false;
+    //return parameter_ptr->constraint_ptr != NULL && (parameter_ptr->constraint_ptr->flags & JACK_CONSTRAINT_FLAG_STRICT) != 0;
+}
+
+bool jackctl_parameter_constraint_is_fake_value(jackctl_parameter parameter)
+{
+    return false;
+    //return parameter_ptr->constraint_ptr != NULL && (parameter_ptr->constraint_ptr->flags & JACK_CONSTRAINT_FLAG_FAKE_VALUE) != 0;
+}
+
 jackctl_param_type_t jackctl_parameter_get_type(jackctl_parameter parameter)
 {
 	return parameter_ptr->type;
@@ -1693,6 +1792,20 @@ bool jackctl_parameter_is_set(jackctl_parameter parameter)
 union jackctl_parameter_value jackctl_parameter_get_value(jackctl_parameter parameter)
 {
 	return *parameter_ptr->value_ptr;
+}
+
+bool jackctl_parameter_reset(jackctl_parameter parameter)
+{
+    if (!parameter_ptr->is_set)
+    {
+        return true;
+    }
+
+    parameter_ptr->is_set = false;
+
+    *parameter_ptr->value_ptr = *parameter_ptr->default_value_ptr;
+
+    return true;
 }
 
 bool jackctl_parameter_set_value(jackctl_parameter parameter, const union jackctl_parameter_value * value_ptr)

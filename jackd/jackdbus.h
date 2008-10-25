@@ -46,9 +46,8 @@ jack_controller_settings_uninit();
 #define JACK_DBUS_ERROR_UNKNOWN_METHOD              "org.jackaudio.Error.UnknownMethod"
 #define JACK_DBUS_ERROR_SERVER_NOT_RUNNING          "org.jackaudio.Error.ServerNotRunning"
 #define JACK_DBUS_ERROR_UNKNOWN_DRIVER              "org.jackaudio.Error.UnknownDriver"
-#define JACK_DBUS_ERROR_NEED_DRIVER                 "org.jackaudio.Error.NeedDriver"
-#define JACK_DBUS_ERROR_UNKNOWN_DRIVER_PARAMETER    "org.jackaudio.Error.UnknownDriverParameter"
-#define JACK_DBUS_ERROR_UNKNOWN_ENGINE_PARAMETER    "org.jackaudio.Error.UnknownEngineParameter"
+#define JACK_DBUS_ERROR_UNKNOWN_INTERNAL            "org.jackaudio.Error.UnknownInternal"
+#define JACK_DBUS_ERROR_UNKNOWN_PARAMETER           "org.jackaudio.Error.UnknownParameter"
 #define JACK_DBUS_ERROR_INVALID_ARGS                "org.jackaudio.Error.InvalidArgs"
 #define JACK_DBUS_ERROR_GENERIC                     "org.jackaudio.Error.Generic"
 #define JACK_DBUS_ERROR_FATAL                       "org.jackaudio.Error.Fatal"
@@ -126,6 +125,11 @@ static                                                                          
 struct jack_dbus_interface_method_argument_descriptor method_name ## _arguments[] =     \
 {
 
+#define JACK_DBUS_METHOD_ARGUMENTS_BEGIN_EX(method_name, descr)                         \
+static const                                                                            \
+struct jack_dbus_interface_method_argument_descriptor method_name ## _arguments[] =     \
+{
+
 #define JACK_DBUS_METHOD_ARGUMENT(argument_name, argument_type, argument_direction_out) \
         {                                                                               \
                 .name = argument_name,                                                  \
@@ -133,17 +137,45 @@ struct jack_dbus_interface_method_argument_descriptor method_name ## _arguments[
                 .direction_out = argument_direction_out                                 \
         },
 
+#define JACK_DBUS_METHOD_ARGUMENT_IN(argument_name, argument_type, descr)               \
+        {                                                                               \
+                .name = argument_name,                                                  \
+                .type = argument_type,                                                  \
+                .direction_out = false                                                  \
+        },
+
+#define JACK_DBUS_METHOD_ARGUMENT_OUT(argument_name, argument_type, descr)              \
+        {                                                                               \
+                .name = argument_name,                                                  \
+                .type = argument_type,                                                  \
+                .direction_out = true                                                   \
+        },
+
 #define JACK_DBUS_METHOD_ARGUMENTS_END                                                  \
 	JACK_DBUS_METHOD_ARGUMENT(NULL, NULL, false)                                    \
 };
 
-#define JACK_DBUS_METHOD_DESCRIBE(method_name, handler_name)                            \
-	{                                                                               \
-		.name = # method_name,                                                  \
-		.arguments = method_name ## _arguments,                                 \
-		.handler = handler_name                                                 \
-	},
+#define JACK_DBUS_METHODS_BEGIN                                                         \
+static const                                                                            \
+struct jack_dbus_interface_method_descriptor methods_dtor[] =                           \
+{
 
+#define JACK_DBUS_METHOD_DESCRIBE(method_name, handler_name)                            \
+        {                                                                               \
+            .name = # method_name,                                                      \
+            .arguments = method_name ## _arguments,                                     \
+            .handler = handler_name                                                     \
+        },
+
+#define JACK_DBUS_METHODS_END                                                           \
+        {                                                                               \
+            .name = NULL,                                                               \
+            .arguments = NULL,                                                          \
+            .handler = NULL                                                             \
+        }                                                                               \
+};
+
+/* TODO: this should go away, JACK_DBUS_METHODS_END should be used instead */
 #define JACK_DBUS_METHOD_DESCRIBE_END                                                   \
 	{                                                                               \
 		.name = NULL,                                                           \
@@ -178,6 +210,25 @@ struct jack_dbus_interface_signal_argument_descriptor signal_name ## _arguments[
                 .arguments = NULL,                                                      \
         }
 
+#define JACK_DBUS_IFACE_BEGIN(iface_var, iface_name)                                    \
+struct jack_dbus_interface_descriptor iface_var =                                       \
+{                                                                                       \
+        .name = iface_name,                                                             \
+        .handler = jack_dbus_run_method,
+
+#define JACK_DBUS_IFACE_HANDLER(handler_func)                                           \
+        .handler = handler_func,
+
+#define JACK_DBUS_IFACE_EXPOSE_METHODS                                                  \
+        .methods = methods_dtor,
+
+#define JACK_DBUS_IFACE_EXPOSE_SIGNALS                                                  \
+        .signals = signals_dtor,
+
+#define JACK_DBUS_IFACE_END                                                             \
+};
+
+/* TODO: this should go away, other JACK_DBUS_IFACE_XXX should be used instead */
 #define JACK_DBUS_IFACE_DESCRIBE(iface_var, iface_name, iface_methods, iface_signals)   \
 struct jack_dbus_interface_descriptor iface_var =                                       \
 {                                                                                       \

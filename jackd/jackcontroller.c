@@ -95,6 +95,7 @@ jack_controller_select_driver(
 	jack_info("driver \"%s\" selected", driver_name);
 
 	controller_ptr->driver = driver;
+	controller_ptr->driver_set = true;
 
 	return true;
 }
@@ -196,6 +197,8 @@ jack_controller_create(
 	}
 
 	controller_ptr->started = false;
+	controller_ptr->driver = NULL;
+	controller_ptr->driver_set = true;
 
 	drivers = (JSList *)jackctl_server_get_drivers_list(controller_ptr->server);
 	controller_ptr->drivers_count = jack_slist_length(drivers);
@@ -211,6 +214,13 @@ jack_controller_create(
 	while (node_ptr != NULL)
 	{
 		*driver_name_target = jackctl_driver_get_name((jackctl_driver)node_ptr->data);
+
+		/* select default driver */
+		if (controller_ptr->driver == NULL && strcmp(*driver_name_target, JACK_DEFAULT_DRIVER) == 0)
+		{
+			controller_ptr->driver = (jackctl_driver_t *)node_ptr->data;
+		}
+
 		node_ptr = jack_slist_next(node_ptr);
 		driver_name_target++;
 	}
