@@ -24,8 +24,8 @@ SOURCE_FILES = \
 	     transclient.c \
 	     unlock.c
 
-simd.lo: simd.c
-	$(LIBTOOL) --mode=compile $(CC) $(JACK_CFLAGS) $(SIMD_CFLAGS) -c -o simd.lo simd.c
+simd.lo: $(srcdir)/simd.c
+	$(LIBTOOL) --mode=compile $(CC) -I$(top_builddir) $(JACK_CFLAGS) $(SIMD_CFLAGS) -c -o simd.lo $(srcdir)/simd.c
 
 lib_LTLIBRARIES	= libjack.la
 

@@ -51,6 +51,10 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include <netjack_packet.h>
 #include <samplerate.h>
 
+#ifdef HAVE_CELT
+#include <celt/celt.h>
+#endif
+
 JSList *capture_ports = NULL;
 JSList *capture_srcs = NULL;
 int capture_channels = 0;
@@ -110,7 +114,15 @@ alloc_ports (int n_capture_audio, int n_playback_audio, int n_capture_midi, int 
             printf( "jack_netsource: cannot register %s port\n", buf);
             break;
         }
-        capture_srcs = jack_slist_append (capture_srcs, src_new (SRC_LINEAR, 1, NULL));
+	if( bitdepth == 1000 ) {
+#ifdef HAVE_CELT
+	    // XXX: memory leak
+	    CELTMode *celt_mode = celt_mode_create( jack_get_sample_rate( client ), 1, jack_get_buffer_size(client), NULL );
+	    capture_srcs = jack_slist_append(capture_srcs, celt_decoder_create( celt_mode ) );
+#endif
+	} else {
+	    capture_srcs = jack_slist_append (capture_srcs, src_new (SRC_LINEAR, 1, NULL));
+	}
         capture_ports = jack_slist_append (capture_ports, port);
     }
 
@@ -139,8 +151,16 @@ alloc_ports (int n_capture_audio, int n_playback_audio, int n_capture_midi, int 
             printf ("jack_netsource: cannot register %s port\n", buf);
             break;
         }
+	if( bitdepth == 1000 ) {
+#ifdef HAVE_CELT
+	    // XXX: memory leak
+	    CELTMode *celt_mode = celt_mode_create( jack_get_sample_rate (client), 1, jack_get_buffer_size(client), NULL );
+	    playback_srcs = jack_slist_append(playback_srcs, celt_encoder_create( celt_mode ) );
+#endif
+	} else {
 	    playback_srcs = jack_slist_append (playback_srcs, src_new (SRC_LINEAR, 1, NULL));
-	    playback_ports = jack_slist_append (playback_ports, port);
+	}
+	playback_ports = jack_slist_append (playback_ports, port);
     }
 
     /* Allocate midi playback channels */
@@ -190,7 +210,12 @@ sync_cb (jack_transport_state_t state, jack_position_t *pos, void *arg)
 int
 process (jack_nframes_t nframes, void *arg)
 {
-    jack_nframes_t net_period = (float) nframes / (float) factor;
+    jack_nframes_t net_period;
+
+    if( bitdepth == 1000 )
+	net_period = factor;
+    else
+	net_period = (float) nframes / (float) factor;
 
     int rx_bufsize =  get_sample_size (bitdepth) * capture_channels * net_period + sizeof (jacknet_packet_header);
     int tx_bufsize =  get_sample_size (bitdepth) * playback_channels * net_period + sizeof (jacknet_packet_header);
@@ -213,24 +238,13 @@ process (jack_nframes_t nframes, void *arg)
 
     packet_bufX = packet_buf + sizeof (jacknet_packet_header) / sizeof (uint32_t);
 
-    /* ---------- Receive ---------- */
+    // New Receive Code:
     if (reply_port)
-        size = netjack_recv (insockfd, (char *) packet_buf, rx_bufsize, MSG_DONTWAIT, mtu);
+        packet_cache_drain_socket(global_packcache, insockfd);
     else
-        size = netjack_recv (outsockfd, (char *) packet_buf, rx_bufsize, MSG_DONTWAIT, mtu);
-    packet_header_ntoh (pkthdr);
-    /* Loop till we get the right packet at the right momment */
-    while (size == rx_bufsize && (framecnt - pkthdr->framecnt) > latency)
-    {
-        //printf ("Frame %d  \tLate packet received with a latency of %d frames (expected frame %d, got frame %d)\n", framecnt, framecnt - pkthdr->framecnt, framecnt - latency, pkthdr->framecnt);
-        //printf ("Frame %d  \tLate packet received with a latency of %d frames\n", framecnt, framecnt - pkthdr->framecnt);
+        packet_cache_drain_socket(global_packcache, outsockfd);
 
-        if (reply_port)
-            size = netjack_recv (insockfd, (char *) packet_buf, rx_bufsize, MSG_DONTWAIT, mtu);
-        else
-            size = netjack_recv (outsockfd, (char *) packet_buf, rx_bufsize, MSG_DONTWAIT, mtu);
-        packet_header_ntoh (pkthdr);
-    }
+    size = packet_cache_retreive_packet( global_packcache, framecnt - latency, (char *)packet_buf, rx_bufsize ); 
 
     /* First alternative : we received what we expected. Render the data
      * to the JACK ports so it can be played. */
@@ -248,7 +262,7 @@ process (jack_nframes_t nframes, void *arg)
         //    printf ("Frame %d  \tSync has been set\n", framecnt);
 
 	state_currentframe = framecnt;
-	state_latency = framecnt - pkthdr->framecnt;
+	//state_latency = framecnt - pkthdr->framecnt;
 	state_connected = 1;
         sync_state = pkthdr->sync_state;
     }
@@ -257,9 +271,13 @@ process (jack_nframes_t nframes, void *arg)
      * to the ouput ports */
     else
     {
+	jack_nframes_t latency_estimate;
+	if( packet_cache_find_latency( global_packcache, framecnt, &latency_estimate ) )
+		state_latency = latency_estimate;
+
 	// Set the counters up.
 	state_currentframe = framecnt;
-	state_latency = framecnt - pkthdr->framecnt;
+	//state_latency = framecnt - pkthdr->framecnt;
 	state_netxruns += 1;
 
         //printf ("Frame %d  \tPacket missed or incomplete (expected: %d bytes, got: %d bytes)\n", framecnt, rx_bufsize, size);
@@ -304,11 +322,11 @@ process (jack_nframes_t nframes, void *arg)
     pkthdr->mtu = mtu;
     
     packet_header_hton (pkthdr);
-    if (cont_miss < 10)
+    if (cont_miss < 2*latency+5)
         netjack_sendto (outsockfd, (char *) packet_buf, tx_bufsize, 0, &destaddr, sizeof (destaddr), mtu);
 //    else if (cont_miss >= 10 && cont_miss <= 50)
 //        printf ("Frame %d  \tToo many packets missed (%d). We have stopped sending data\n", framecnt, cont_miss);
-    else if (cont_miss > 50)
+    else if (cont_miss > 50+5*latency)
     {
 	state_connected = 0;
         //printf ("Frame %d  \tRealy too many packets missed (%d). Let's reset the counter\n", framecnt, cont_miss);
@@ -365,6 +383,7 @@ fprintf (stderr, "usage: jack_netsource -h <host peer> [options]\n"
         "  -f <downsample ratio> - Downsample data in the wire by this factor\n"
         "  -b <bitdepth> - Set transport to use 16bit or 8bit\n"
         "  -m <mtu> - Assume this mtu for the link\n"
+	"  -c <bytes> - Use Celt and encode <bytes> per channel and packet.\n"
         "\n");
 }
 
@@ -396,7 +415,7 @@ main (int argc, char *argv[])
     sprintf(client_name, "netsource");
     sprintf(peer_ip, "localhost");
 
-    while ((c = getopt (argc, argv, ":n:s:h:p:C:P:i:o:l:r:f:b:m:")) != -1)
+    while ((c = getopt (argc, argv, ":n:s:h:p:C:P:i:o:l:r:f:b:m:c:")) != -1)
     {
         switch (c)
         {
@@ -442,6 +461,15 @@ main (int argc, char *argv[])
             case 'b':
             bitdepth = atoi (optarg);
             break;
+	    case 'c':
+#ifdef HAVE_CELT
+	    bitdepth = 1000;
+	    factor = atoi (optarg);
+#else
+	    printf( "not built with celt supprt\n" );
+	    exit(10);
+#endif
+	    break;
             case 'm':
             mtu = atoi (optarg);
             break;

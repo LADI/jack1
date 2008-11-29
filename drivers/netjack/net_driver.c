@@ -43,6 +43,10 @@ $Id: net_driver.c,v 1.17 2006/04/16 20:16:10 torbenh Exp $
 
 #include <samplerate.h>
 
+#ifdef HAVE_CELT
+#include <celt/celt.h>
+#endif
+
 #include "net_driver.h"
 #include "netjack_packet.h"
 
@@ -81,29 +85,116 @@ net_driver_wait (net_driver_t *driver, int extra_fd, int *status, float *delayed
     // on packet loss we should either detect an xrun or just continue running when we
     // think, that the sync source is not running anymore.
 
-    socklen_t address_size = sizeof (struct sockaddr_in);
-    int bufsize, len;
+    //socklen_t address_size = sizeof (struct sockaddr_in);
+    //int len;
+    int we_have_the_expected_frame = 0;
+    jack_nframes_t next_frame_avail;
     jacknet_packet_header *pkthdr = (jacknet_packet_header *) driver->rx_buf;
     
-    bufsize =  get_sample_size (driver->bitdepth) * driver->capture_channels * driver->net_period_down + sizeof (jacknet_packet_header);
-
-    if (netjack_poll (driver->sockfd, 500))
-        len = netjack_recvfrom (driver->sockfd, (char *)driver->rx_buf, bufsize, MSG_WAITALL, (struct sockaddr*) & driver->syncsource_address, &address_size, driver->mtu);
-    else
-        len = 0;
-    while (len != bufsize)
-    {
-        jack_error ("wrong_packet_len: len=%d, expected=%d", len, bufsize);
-        if (netjack_poll (driver->sockfd, 500))
-            len = netjack_recvfrom (driver->sockfd, (char *)driver->rx_buf, bufsize, MSG_WAITALL, (struct sockaddr*) & driver->syncsource_address, &address_size, driver->mtu);
-        else
-            len = 0;
+    if( !driver->next_deadline_valid ) {
+	    driver->next_deadline = jack_get_microseconds() + 2*driver->period_usecs;
+	    driver->next_deadline_valid = 1;
+    } else {
+	    driver->next_deadline += driver->period_usecs;
     }
 
-    packet_header_ntoh (pkthdr);
+    while(1) {
+	if( ! netjack_poll_deadline( driver->sockfd, driver->next_deadline ) )
+	    break;
+
+	packet_cache_drain_socket( global_packcache, driver->sockfd );
+
+	if( packet_cache_get_next_available_framecnt( global_packcache, driver->expected_framecnt, &next_frame_avail) ) {
+	    if( next_frame_avail == driver->expected_framecnt ) {
+		we_have_the_expected_frame = 1;
+		break;
+	    }
+	    //printf( "next frame = %d  (exp: %d) \n", next_frame_avail, driver->expected_framecnt );
+	}
+    }
+
+    driver->running_free = 0;
+
+    if( we_have_the_expected_frame ) {
+	packet_cache_retreive_packet( global_packcache, driver->expected_framecnt, (char *) driver->rx_buf, driver->rx_bufsize );
+	driver->packet_data_valid = 1;
+	//printf( "ok... %d\n", driver->expected_framecnt );
+    } else {
+	// bah... the packet is not there.
+	// either 
+	// - it got lost.
+	// - its late
+	// - sync source is not sending anymore.
+	
+	// lets check if we have the next packets, we will just run a cycle without data.
+	// in that case.
+	
+	if( packet_cache_get_next_available_framecnt( global_packcache, driver->expected_framecnt, &next_frame_avail) ) 
+	{
+	    jack_nframes_t offset = next_frame_avail - driver->expected_framecnt;
+
+	    if( offset < driver->resync_threshold ) {
+		// ok. dont do nothing. we will run without data. 
+		// this seems to be one or 2 lost packets.
+		driver->packet_data_valid = 0;
+		//printf( "lost packet... %d\n", driver->expected_framecnt );
+		
+	    } else {
+		// the diff is too high. but we have a packet.
+		// lets resync.
+		driver->expected_framecnt = next_frame_avail;
+		packet_cache_retreive_packet( global_packcache, driver->expected_framecnt, (char *) driver->rx_buf, driver->rx_bufsize );
+		driver->next_deadline_valid = 0;
+		driver->packet_data_valid = 1;
+		//printf( "resync... expected: %d, offset=%d\n", driver->expected_framecnt, offset );
+	    }
+	    
+	} else {
+	    // no packets in buffer.
+	    driver->packet_data_valid = 0;
+
+	    if( driver->num_lost_packets < 3 ) {
+		// increase deadline.
+		driver->next_deadline += driver->period_usecs/4;
+		// might be lost packets.
+		// continue
+	    } else if( (driver->num_lost_packets <= 10) ) { 
+		// lets try adjusting the deadline, for some packets, we might have just ran 2 fast.
+	    } else {
+		// give up. lets run freely.
+		driver->running_free = 1;
+		
+		// But now we can check for any new frame available.
+		if( packet_cache_get_next_available_framecnt( global_packcache, 0, &next_frame_avail) ) {
+		    driver->expected_framecnt = next_frame_avail;
+		    packet_cache_retreive_packet( global_packcache, driver->expected_framecnt, (char *) driver->rx_buf, driver->rx_bufsize );
+		    driver->next_deadline_valid = 0;
+		    driver->packet_data_valid = 1;
+		    driver->running_free = 1;
+		    //printf( "resync after freerun... %d\n", driver->expected_framecnt );
+		}
+	    }
+
+	    //printf( "free... %d\n", driver->expected_framecnt );
+	}
+    }
+
+    if( !driver->packet_data_valid )
+	driver->num_lost_packets += 1;
+    else {
+	driver->num_lost_packets = 0;
+	packet_header_ntoh (pkthdr);
+    }
+
+    framecnt = driver->expected_framecnt;
+    driver->expected_framecnt += 1;
+
+    
     driver->last_wait_ust = jack_get_microseconds ();
     driver->engine->transport_cycle_start (driver->engine, driver->last_wait_ust);
+
     /* this driver doesn't work so well if we report a delay */
+    /* XXX: this might not be the case anymore */
     *delayed_usecs = 0;		/* lie about it */
     *status = 0;
     return driver->period_size;
@@ -119,19 +210,9 @@ net_driver_run_cycle (net_driver_t *driver)
     jack_nframes_t nframes = net_driver_wait (driver, -1, &wait_status,
                              &delayed_usecs);
 
-    // currently there is no xrun detection.
-    // so nframes will always be period_size.
-    // XXX: i uncomment this code because the signature of delay()
-    //      changed samewhere in the 0.99.x series. so this is the showstopper for 0.99.0
-
-#if 0
-    if (nframes == 0) {
-        /* we detected an xrun and restarted: notify
-        * clients about the delay. */
-        engine->delay (engine, delayed_usecs);
-        return 0;
-    }
-#endif
+    // XXX: xrun code removed.
+    //      especially with celt there are no real xruns anymore.
+    //      things are different on the net.
 
     if (wait_status == 0)
         return engine->run_cycle (engine, nframes, delayed_usecs);
@@ -145,6 +226,10 @@ net_driver_run_cycle (net_driver_t *driver)
 static int
 net_driver_null_cycle (net_driver_t* driver, jack_nframes_t nframes)
 {
+    // TODO: talk to paul about this.
+    //       do i wait here ?
+    //       just sending out a packet marked with junk ?
+
     //int rx_size = get_sample_size(driver->bitdepth) * driver->capture_channels * driver->net_period_down + sizeof(jacknet_packet_header);
     int tx_size = get_sample_size(driver->bitdepth) * driver->playback_channels * driver->net_period_up + sizeof(jacknet_packet_header);
     unsigned int *packet_buf, *packet_bufX;
@@ -153,7 +238,7 @@ net_driver_null_cycle (net_driver_t* driver, jack_nframes_t nframes)
     jacknet_packet_header *tx_pkthdr = (jacknet_packet_header *)packet_buf;
     jacknet_packet_header *rx_pkthdr = (jacknet_packet_header *)driver->rx_buf;
 
-    framecnt = rx_pkthdr->framecnt;
+    //framecnt = rx_pkthdr->framecnt;
 
     driver->reply_port = rx_pkthdr->reply_port;
 
@@ -191,14 +276,15 @@ net_driver_bufsize (net_driver_t* driver, jack_nframes_t nframes)
 static int
 net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
 {
-    //jack_default_audio_sample_t* buf;
-    //jack_port_t *port;
     jack_position_t local_trans_pos;
     jack_transport_state_t local_trans_state;
 
-    //int bufsize =  get_sample_size(driver->bitdepth) * driver->capture_channels * driver->net_period_down + sizeof(jacknet_packet_header);
     unsigned int *packet_buf, *packet_bufX;
 
+    if( ! driver->packet_data_valid ) {
+	render_payload_to_jack_ports (driver->bitdepth, NULL, driver->net_period_down, driver->capture_ports, driver->capture_srcs, nframes);
+	return 0;
+    }
     packet_buf = driver->rx_buf;
 
     jacknet_packet_header *pkthdr = (jacknet_packet_header *)packet_buf;
@@ -213,6 +299,8 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
 
     framecnt = pkthdr->framecnt;
     driver->reply_port = pkthdr->reply_port;
+    driver->latency = pkthdr->latency;
+    driver->resync_threshold = pkthdr->latency-1;
 
     // check whether, we should handle the transport sync stuff, or leave trnasports untouched.
     if (driver->handle_transport_sync) {
@@ -273,10 +361,13 @@ net_driver_write (net_driver_t* driver, jack_nframes_t nframes)
     uint32_t *packet_buf, *packet_bufX;
 
     int packet_size = get_sample_size(driver->bitdepth) * driver->playback_channels * driver->net_period_up + sizeof(jacknet_packet_header);
+    jacknet_packet_header *pkthdr; 
 
     packet_buf = alloca(packet_size);
+    pkthdr = (jacknet_packet_header *)packet_buf;
 
-    jacknet_packet_header *pkthdr = (jacknet_packet_header *)packet_buf;
+    if( driver->running_free )
+	return 0;
 
     // offset packet_bufX by the packetheader.
     packet_bufX = packet_buf + sizeof(jacknet_packet_header) / sizeof(jack_default_audio_sample_t);
@@ -290,6 +381,7 @@ net_driver_write (net_driver_t* driver, jack_nframes_t nframes)
     if (driver->srcaddress_valid)
         if (driver->reply_port)
             driver->syncsource_address.sin_port = htons(driver->reply_port);
+
     netjack_sendto(driver->outsockfd, (char *)packet_buf, packet_size,
                     0, (struct sockaddr*)&driver->syncsource_address, sizeof(struct sockaddr_in), driver->mtu);
 
@@ -327,7 +419,16 @@ net_driver_attach (net_driver_t *driver)
 
         driver->capture_ports =
             jack_slist_append (driver->capture_ports, port);
-        driver->capture_srcs = jack_slist_append(driver->capture_srcs, src_new(SRC_LINEAR, 1, NULL));
+
+	if( driver->bitdepth == 1000 ) {
+#ifdef HAVE_CELT
+	    // XXX: memory leak
+	    CELTMode *celt_mode = celt_mode_create( driver->sample_rate, 1, driver->period_size, NULL );
+	    driver->capture_srcs = jack_slist_append(driver->capture_srcs, celt_decoder_create( celt_mode ) );
+#endif
+	} else {
+	    driver->capture_srcs = jack_slist_append(driver->capture_srcs, src_new(SRC_LINEAR, 1, NULL));
+	}
     }
     for (chn = driver->capture_channels_audio; chn < driver->capture_channels; chn++) {
         snprintf (buf, sizeof(buf) - 1, "capture_%u", chn + 1);
@@ -361,7 +462,15 @@ net_driver_attach (net_driver_t *driver)
 
         driver->playback_ports =
             jack_slist_append (driver->playback_ports, port);
-        driver->playback_srcs = jack_slist_append(driver->playback_srcs, src_new(SRC_LINEAR, 1, NULL));
+	if( driver->bitdepth == 1000 ) {
+#ifdef HAVE_CELT
+	    // XXX: memory leak
+	    CELTMode *celt_mode = celt_mode_create( driver->sample_rate, 1, driver->period_size, NULL );
+	    driver->playback_srcs = jack_slist_append(driver->playback_srcs, celt_encoder_create( celt_mode ) );
+#endif
+	} else {
+	    driver->playback_srcs = jack_slist_append(driver->playback_srcs, src_new(SRC_LINEAR, 1, NULL));
+	}
     }
     for (chn = driver->playback_channels_audio; chn < driver->playback_channels; chn++) {
         snprintf (buf, sizeof(buf) - 1, "playback_%u", chn + 1);
@@ -433,7 +542,7 @@ net_driver_new (jack_client_t * client,
                 unsigned int bitdepth)
 {
     net_driver_t * driver;
-    int first_pack_len, rx_bufsize;
+    int first_pack_len;
     struct sockaddr_in address;
 
     jack_info ("creating net driver ... %s|%" PRIu32 "|%" PRIu32
@@ -475,7 +584,7 @@ net_driver_new (jack_client_t * client,
     driver->client = client;
     driver->engine = NULL;
 
-    if ((bitdepth != 0) && (bitdepth != 8) && (bitdepth != 16))
+    if ((bitdepth != 0) && (bitdepth != 8) && (bitdepth != 16) && (bitdepth != 1000))
     {
         jack_info ("Invalid bitdepth: %d (8, 16 or 0 for float) !!!", bitdepth);
         return NULL;
@@ -516,6 +625,8 @@ net_driver_new (jack_client_t * client,
     jack_info ("Waiting for an incoming packet !!!");
     jack_info ("*** IMPORTANT *** Dont connect a client to jackd until the driver is attached to a clock source !!!");
 
+    // XXX: netjack_poll polls forever.
+    //      thats ok here.
     if (netjack_poll (driver->sockfd, 500))
         first_pack_len = recvfrom (driver->sockfd, first_packet, sizeof (jacknet_packet_header), 0, (struct sockaddr*) & driver->syncsource_address, &address_size);
     else
@@ -571,23 +682,36 @@ net_driver_new (jack_client_t * client,
 
     // After possible Autoconfig: do all calculations...
     driver->period_usecs =
-        (jack_time_t) floor ((((float) driver->period_size) / driver->sample_rate)
+        (jack_time_t) floor ((((float) driver->period_size) / (float)driver->sample_rate)
                              * 1000000.0f);
 
-    driver->net_period_down = (float) driver->period_size / (float) resample_factor;
-    driver->net_period_up = (float) driver->period_size / (float) resample_factor_up;
+    if( driver->bitdepth == 1000 ) {
+	// celt mode. 
+	// TODO: this is a hack. But i dont want to change the packet header.
+	driver->net_period_down = resample_factor;
+	driver->net_period_up = resample_factor_up;
+    } else {
+	driver->net_period_down = (float) driver->period_size / (float) resample_factor;
+	driver->net_period_up = (float) driver->period_size / (float) resample_factor_up;
+    }
 
-    /* TODO: this seems... useles */
-    rx_bufsize = sizeof (jacknet_packet_header) + driver->net_period_down * driver->capture_channels * get_sample_size (driver->bitdepth);
-    driver->rx_buf = malloc (rx_bufsize);
-    driver->pkt_buf = malloc (rx_bufsize);
-    global_packcache = packet_cache_new (driver->latency + 5, rx_bufsize, driver->mtu);
+    driver->rx_bufsize = sizeof (jacknet_packet_header) + driver->net_period_down * driver->capture_channels * get_sample_size (driver->bitdepth);
+    driver->rx_buf = malloc (driver->rx_bufsize);
+    driver->pkt_buf = malloc (driver->rx_bufsize);
+    global_packcache = packet_cache_new (driver->latency + 5, driver->rx_bufsize, driver->mtu);
+
+    driver->expected_framecnt_valid = 0;
+    driver->num_lost_packets = 0;
+    driver->next_deadline_valid = 0;
+
+    driver->resync_threshold = driver->latency - 1;
+    driver->running_free = 0;
 
     jack_info ("netjack: period   : up: %d / dn: %d", driver->net_period_up, driver->net_period_down);
     jack_info ("netjack: framerate: %d", driver->sample_rate);
     jack_info ("netjack: audio    : cap: %d / pbk: %d)", driver->capture_channels_audio, driver->playback_channels_audio);
     jack_info ("netjack: midi     : cap: %d / pbk: %d)", driver->capture_channels_midi, driver->playback_channels_midi);
-    jack_info ("netjack: buffsize : rx: %d)", rx_bufsize);
+    jack_info ("netjack: buffsize : rx: %d)", driver->rx_bufsize);
     return (jack_driver_t *) driver;
 }
 
@@ -602,7 +726,7 @@ driver_get_descriptor ()
 
     desc = calloc (1, sizeof (jack_driver_desc_t));
     strcpy (desc->name, "net");
-    desc->nparams = 11;
+    desc->nparams = 12;
 
     params = calloc (desc->nparams, sizeof (jack_driver_param_desc_t));
 
@@ -679,6 +803,15 @@ driver_get_descriptor ()
     params[i].value.ui   = 0U;
     strcpy (params[i].short_desc,
             "Factor for sample rate reduction on the upstream");
+    strcpy (params[i].long_desc, params[i].short_desc);
+
+    i++;
+    strcpy (params[i].name, "celt");
+    params[i].character  = 'c';
+    params[i].type       = JackDriverParamUInt;
+    params[i].value.ui   = 0U;
+    strcpy (params[i].short_desc,
+            "sets celt encoding and number of bytes per channel");
     strcpy (params[i].long_desc, params[i].short_desc);
 
     i++;
@@ -767,6 +900,16 @@ driver_initialize (jack_client_t *client, const JSList * params)
             case 'b':
                 bitdepth = param->value.ui;
                 break;
+
+	    case 'c':
+#ifdef HAVE_CELT
+		bitdepth = 1000;
+		resample_factor = param->value.ui;
+#else
+		printf( "not built with celt support\n" );
+		exit(10);
+#endif
+		break;
 
             case 't':
                 handle_transport_sync = param->value.ui;
