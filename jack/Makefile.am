@@ -24,6 +24,7 @@ noinst_HEADERS =		\
 	internal.h 		\
 	intsimd.h 		\
 	jslist.h		\
+	list.h                  \
 	memops.h		\
 	messagebuffer.h		\
 	pool.h			\
