@@ -26,6 +26,11 @@
  *
  */
 
+#include "config.h"
+
+#if HAVE_PPOLL
+#define _GNU_SOURCE
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -41,9 +46,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-
-// for ppoll
-#define __USE_GNU
 #include <poll.h>
 
 #include <errno.h>
@@ -51,7 +53,7 @@
 
 #include <samplerate.h>
 
-#ifdef HAVE_CELT
+#if HAVE_CELT
 #include <celt/celt.h>
 #endif
 
@@ -129,6 +131,7 @@ packet_cache
 
     pcache->size = num_packets;
     pcache->packets = malloc (sizeof (cache_packet) * num_packets);
+    pcache->master_address_valid = 0;
     if (pcache->packets == NULL)
     {
         jack_error ("could not allocate packet cache (2)\n");
@@ -196,6 +199,7 @@ cache_packet
     // Get The Oldest packet and reset it.
 
     retval = packet_cache_get_oldest_packet (pcache);
+    //printf( "Dropping %d from Cache :S\n", retval->framecnt );
     cache_packet_reset (retval);
     cache_packet_set_framecnt (retval, framecnt);
 
@@ -325,13 +329,23 @@ netjack_poll_deadline (int sockfd, jack_time_t deadline)
     int i, poll_err = 0;
     sigset_t sigmask;
     struct sigaction action;
+#if HAVE_PPOLL
     struct timespec timeout_spec = { 0, 0 }; 
+#else
+    sigset_t rsigmask;
+    int timeout;
+#endif
+
 
     jack_time_t now = jack_get_microseconds();
     if( now >= deadline )
 	return 0;
 
+#if HAVE_PPOLL
     timeout_spec.tv_nsec = (deadline - now) * 1000;
+#else
+    timeout = lrintf( (float)(deadline - now) / 1000.0 );
+#endif
 
     sigemptyset(&sigmask);
 	sigaddset(&sigmask, SIGHUP);
@@ -353,7 +367,13 @@ netjack_poll_deadline (int sockfd, jack_time_t deadline)
     fds.fd = sockfd;
     fds.events = POLLIN;
 
+#if HAVE_PPOLL
     poll_err = ppoll (&fds, 1, &timeout_spec, &sigmask);
+#else
+    sigprocmask (SIG_UNBLOCK, &sigmask, &rsigmask);
+    poll_err = poll (&fds, 1, timeout);
+    sigprocmask (SIG_SETMASK, &rsigmask, NULL);
+#endif
 
     if (poll_err == -1)
     {
@@ -450,24 +470,61 @@ packet_cache_drain_socket( packet_cache *pcache, int sockfd )
     int rcv_len;
     jack_nframes_t framecnt;
     cache_packet *cpack;
+    struct sockaddr_in sender_address;
+    socklen_t senderlen = sizeof( struct sockaddr_in );
 
     while (1)
     {
-        rcv_len = recv (sockfd, rx_packet, pcache->mtu, MSG_DONTWAIT);
+        rcv_len = recvfrom (sockfd, rx_packet, pcache->mtu, MSG_DONTWAIT,
+			    (struct sockaddr*) &sender_address, &senderlen);
         if (rcv_len < 0)
             return;
+
+	if (pcache->master_address_valid) {
+	    // Verify its from our master.
+	    if (memcmp (&sender_address, &(pcache->master_address), senderlen) != 0)
+		continue;
+	} else {
+	    // Setup this one as master
+	    //printf( "setup master...\n" );
+	    memcpy ( &(pcache->master_address), &sender_address, senderlen ); 
+	    pcache->master_address_valid = 1;
+	}
+
         framecnt = ntohl (pkthdr->framecnt);
 	//printf( "Got Packet %d\n", framecnt );
         cpack = packet_cache_get_packet (global_packcache, framecnt);
         cache_packet_add_fragment (cpack, rx_packet, rcv_len);
+	cpack->recv_timestamp = jack_get_microseconds();
+    }
+}
+
+void 
+packet_cache_reset_master_address( packet_cache *pcache )
+{
+    pcache->master_address_valid = 0;
+}
+
+void
+packet_cache_clear_old_packets (packet_cache *pcache, jack_nframes_t framecnt )
+{
+    int i;
+
+    for (i = 0; i < pcache->size; i++)
+    {
+        if (pcache->packets[i].valid && (pcache->packets[i].framecnt < framecnt))
+        {
+            cache_packet_reset (&(pcache->packets[i]));
+        }
     }
 }
 
 int
-packet_cache_retreive_packet( packet_cache *pcache, jack_nframes_t framecnt, char *packet_buf, int pkt_size )
+packet_cache_retreive_packet( packet_cache *pcache, jack_nframes_t framecnt, char *packet_buf, int pkt_size, jack_time_t *timestamp )
 {
     int i;
     cache_packet *cpack = NULL;
+
 
     for (i = 0; i < pcache->size; i++) {
         if (pcache->packets[i].valid && (pcache->packets[i].framecnt == framecnt)) {
@@ -476,16 +533,41 @@ packet_cache_retreive_packet( packet_cache *pcache, jack_nframes_t framecnt, cha
 	}
     }
 
-    if( cpack == NULL )
+    if( cpack == NULL ) {
+	//printf( "retreive packet: %d....not found\n", framecnt );
 	return -1;
+    }
 
-    if( !cache_packet_is_complete( cpack ) )
+    if( !cache_packet_is_complete( cpack ) ) {
 	return -1;
+    }
 
     // ok. cpack is the one we want and its complete.
     memcpy (packet_buf, cpack->packet_buf, pkt_size);
+    if( timestamp )
+	*timestamp = cpack->recv_timestamp;
+
     cache_packet_reset (cpack);
+    packet_cache_clear_old_packets( pcache, framecnt );
+    
     return pkt_size;
+}
+
+float
+packet_cache_get_fill( packet_cache *pcache, jack_nframes_t expected_framecnt )
+{
+    int num_packets_before_us = 0;
+    int i;
+
+    for (i = 0; i < pcache->size; i++)
+    {
+	cache_packet *cpack = &(pcache->packets[i]);
+        if (cpack->valid && cache_packet_is_complete( cpack ))
+	    if( cpack->framecnt >= expected_framecnt )
+		num_packets_before_us += 1;
+    }
+
+    return 100.0 * (float)num_packets_before_us / (float)( pcache->size ) ;
 }
 
 // Returns 0 when no valid packet is inside the cache.
@@ -518,6 +600,37 @@ packet_cache_get_next_available_framecnt( packet_cache *pcache, jack_nframes_t e
     }
     if( retval && framecnt )
 	*framecnt = expected_framecnt + best_offset;
+
+    return retval;
+}
+
+int
+packet_cache_get_highest_available_framecnt( packet_cache *pcache, jack_nframes_t *framecnt )
+{
+    int i;
+    jack_nframes_t best_value = 0;
+    int retval = 0;
+
+    for (i = 0; i < pcache->size; i++)
+    {
+	cache_packet *cpack = &(pcache->packets[i]);
+	//printf( "p%d: valid=%d, frame %d\n", i, cpack->valid, cpack->framecnt );
+
+        if (!cpack->valid || !cache_packet_is_complete( cpack )) {
+	    //printf( "invalid\n" );
+	    continue;
+	}
+
+	if (cpack->framecnt < best_value) {
+	    continue;
+	}
+
+	best_value = cpack->framecnt;	
+	retval = 1;
+
+    }
+    if( retval && framecnt )
+	*framecnt = best_value;
 
     return retval;
 }
@@ -618,12 +731,18 @@ netjack_sendto (int sockfd, char *packet_buf, int pkt_size, int flags, struct so
     int fragment_payload_size = mtu - sizeof (jacknet_packet_header);
 
     if (pkt_size <= mtu) {
+	int err;
 	pkthdr = (jacknet_packet_header *) packet_buf;
         pkthdr->fragment_nr = htonl (0);
-        sendto(sockfd, packet_buf, pkt_size, flags, addr, addr_size);
+        err = sendto(sockfd, packet_buf, pkt_size, flags, addr, addr_size);
+	if( err<0 ) {
+	    printf( "error in send\n" );
+	    perror( "send" );
+	}
     }
     else
     {
+	int err;
         // Copy the packet header to the tx pack first.
         memcpy(tx_packet, packet_buf, sizeof (jacknet_packet_header));
 
@@ -644,7 +763,11 @@ netjack_sendto (int sockfd, char *packet_buf, int pkt_size, int flags, struct so
         //jack_error("last fragment_count = %d, payload_size = %d\n", fragment_count, last_payload_size);
 
         // sendto(last_pack_size);
-        sendto(sockfd, tx_packet, last_payload_size + sizeof(jacknet_packet_header), flags, addr, addr_size);
+        err = sendto(sockfd, tx_packet, last_payload_size + sizeof(jacknet_packet_header), flags, addr, addr_size);
+	if( err<0 ) {
+	    printf( "error in send\n" );
+	    perror( "send" );
+	}
     }
 }
 
@@ -1113,7 +1236,7 @@ render_jack_ports_to_payload_8bit (JSList *playback_ports, JSList *playback_srcs
     }
 }
 
-#ifdef HAVE_CELT
+#if HAVE_CELT
 // render functions for celt.
 void
 render_payload_to_jack_ports_celt (void *packet_payload, jack_nframes_t net_period_down, JSList *capture_ports, JSList *capture_srcs, jack_nframes_t nframes)
@@ -1183,7 +1306,7 @@ render_jack_ports_to_payload_celt (JSList *playback_ports, JSList *playback_srcs
 	    CELTEncoder *encoder = src_node->data;
 	    encoded_bytes = celt_encode_float( encoder, floatbuf, NULL, packet_bufX, net_period_up );
 	    if( encoded_bytes != net_period_up )
-		printf( "bah... they are not the same\n" );
+		printf( "something in celt changed. netjack needs to be changed to handle this.\n" );
 	    src_node = jack_slist_next( src_node );
         }
         else if (strncmp(portname, JACK_DEFAULT_MIDI_TYPE, jack_port_type_size()) == 0)
@@ -1209,7 +1332,7 @@ render_payload_to_jack_ports (int bitdepth, void *packet_payload, jack_nframes_t
         render_payload_to_jack_ports_8bit (packet_payload, net_period_down, capture_ports, capture_srcs, nframes);
     else if (bitdepth == 16)
         render_payload_to_jack_ports_16bit (packet_payload, net_period_down, capture_ports, capture_srcs, nframes);
-#ifdef HAVE_CELT
+#if HAVE_CELT
     else if (bitdepth == 1000)
         render_payload_to_jack_ports_celt (packet_payload, net_period_down, capture_ports, capture_srcs, nframes);
 #endif
@@ -1224,7 +1347,7 @@ render_jack_ports_to_payload (int bitdepth, JSList *playback_ports, JSList *play
         render_jack_ports_to_payload_8bit (playback_ports, playback_srcs, nframes, packet_payload, net_period_up);
     else if (bitdepth == 16)
         render_jack_ports_to_payload_16bit (playback_ports, playback_srcs, nframes, packet_payload, net_period_up);
-#ifdef HAVE_CELT
+#if HAVE_CELT
     else if (bitdepth == 1000)
         render_jack_ports_to_payload_celt (playback_ports, playback_srcs, nframes, packet_payload, net_period_up);
 #endif

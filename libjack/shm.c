@@ -100,7 +100,6 @@ static char jack_shm_server_prefix[JACK_SERVER_NAME_SIZE] = "";
  * again on that machine until after a reboot.
  */
 
-#define JACK_SEMAPHORE_KEY 0x282929
 #ifndef USE_POSIX_SHM
 #define JACK_SHM_REGISTRY_KEY JACK_SEMAPHORE_KEY
 #endif
@@ -653,9 +652,12 @@ static void
 jack_remove_shm (jack_shm_id_t *id)
 {
 	/* registry may or may not be locked */
-	if (shm_unlink ((char *) id) != 0) {
-		jack_error ("could not remove SHM ID %s", id);
-	}
+	/* note that in many cases the client has already removed
+	   the shm segment, so this failing is not an error.
+	   XXX it would be good to differentiate between these
+	   two conditions.
+	*/
+	shm_unlink ((char *) id);
 }
 
 void

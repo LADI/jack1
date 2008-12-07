@@ -5,8 +5,8 @@ install-exec-hook:
 	@echo "Nothing to make for $@."
 else
 install-exec-hook:
-	@echo "Removing JACK shared memory registry."
-	-ipcrm -M @JACK_SHM_REGISTRY_KEY@
+	@echo "Removing JACK shared memory registry key " $(JACK_SEMAPHORE_KEY)
+	-ipcrm -M $(JACK_SEMAPHORE_KEY)
 endif
 
 SOURCE_FILES = \
@@ -25,7 +25,7 @@ SOURCE_FILES = \
 	     unlock.c
 
 simd.lo: $(srcdir)/simd.c
-	$(LIBTOOL) --mode=compile $(CC) -I$(top_builddir) $(JACK_CFLAGS) $(SIMD_CFLAGS) -c -o simd.lo $(srcdir)/simd.c
+	$(LIBTOOL) --mode=compile $(CC) -I$(top_builddir) $(JACK_CORE_CFLAGS) $(SIMD_CFLAGS) -c -o simd.lo $(srcdir)/simd.c
 
 lib_LTLIBRARIES	= libjack.la
 

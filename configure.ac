@@ -16,18 +16,19 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=115
-JACK_MICRO_VERSION=6
+JACK_MINOR_VERSION=116
+JACK_MICRO_VERSION=1
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
 dnl
 dnl increment the protocol version whenever a change is
 dnl made to the way libjack communicates with jackd
-dnl that would break applications linked with an older
-dnl version of libjack.
+dnl that would break applications statically linked with an older
+dnl version of libjack. NOTE: statically linking to libjack
+dnl is a huge mistake.
 dnl ---
-JACK_PROTOCOL_VERSION=23
+JACK_PROTOCOL_VERSION=24
 
 dnl ---
 dnl HOWTO: updating the libjack interface version
@@ -70,6 +71,13 @@ AC_SUBST(JACK_RELEASE)
 AM_INIT_AUTOMAKE(jack-audio-connection-kit,${JACK_VERSION})
 AM_MAINTAINER_MODE
 
+dnl
+dnl save any user-provided CFLAGS so we can forget
+dnl about any nonsense that configure generates
+dnl 
+
+ORIGINAL_CFLAGS="$CFLAGS"
+
 AM_CONFIG_HEADER(config.h)
 AC_ENABLE_STATIC(no)
 AC_ENABLE_SHARED(yes)
@@ -78,7 +86,16 @@ AC_PROG_CXX
 AC_PROG_LD
 AM_PROG_LIBTOOL
 AC_PROG_LN_S
+AM_PROG_CC_C_O
 AC_C_BIGENDIAN
+
+dnl
+dnl now use those user-provided CFLAGS
+dnl and dump whatever nonsense configure generated
+dnl while looking for a compiler
+dnl
+
+CFLAGS="$ORIGINAL_CFLAGS"
 
 AC_MSG_CHECKING([platform dependencies])
 
@@ -170,6 +187,21 @@ AC_CHECK_FUNCS(on_exit atexit)
 AC_CHECK_FUNCS(posix_memalign)
 AC_CHECK_LIB(m, sin)
 
+echo -n "Checking for ppoll()... "
+AC_EGREP_CPP( ppoll,
+[
+#define _GNU_SOURCE
+#include <poll.h>
+], [
+    	AC_DEFINE(HAVE_PPOLL,1,"Whether ppoll is available")
+	echo "yes"
+   ],[
+    	AC_DEFINE(HAVE_PPOLL,0,"Whether ppoll is available")
+	echo "no"
+   ] )
+
+	 
+
 AC_CHECK_FUNC(clock_gettime, 
        [
            AC_DEFINE(HAVE_CLOCK_GETTIME,0,"Whether or not clock_gettime can be found in system libraries")
@@ -218,9 +250,15 @@ AM_CONDITIONAL(USE_POSIX_SHM, $USE_POSIX_SHM)
 
 JACK_CORE_CFLAGS="-I\$(top_srcdir)/config -I\$(top_srcdir) \
 -I\$(top_srcdir) -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -Wall"
-JACK_OPT_CFLAGS="$JACK_CORE_CFLAGS -O3 \
--ffast-math -funroll-loops -fprefetch-loop-arrays"
-JACK_CFLAGS="$JACK_CORE_CFLAGS $CFLAGS"
+
+JACK_LIBC_HELPER_FLAGS=
+AC_ARG_ENABLE(ancient_libc,
+	AC_HELP_STRING([--enable-ancient-libc],[Add required CFLAGS for libc versions too old to expose PThread R/W Lock and other modern code]),
+	JACK_LIBC_HELPER_FLAGS="-D_XOPEN_SOURCE=600 -D_BSD_SOURCE",
+	JACK_LIBC_HELPER_FLAGS=""
+	)
+	 
+JACK_CORE_CFLAGS="$JACK_CORE_CFLAGS $JACK_LIBC_HELPER_FLAGS"   
 
 AC_ARG_WITH(cpu-target,
             [  --with-cpu-target=cpu-type    explicit, overriding argument for gcc -march= flag])
@@ -236,7 +274,7 @@ dnl ----------------------------------------------------------------------
 if test "$target_cpu" = "powerpc64" ; then
 
     AC_ARG_ENABLE(cell,
-	[  --enable-cell           enable Cell BE support (default=no)],,
+	AC_HELP_STRING([--enable-cell],[enable Cell BE support (default=no)]),,
 	[ enable_cell=no ])
 
     if test "x$enable_cell" = xyes; then
@@ -254,7 +292,7 @@ if test "$target_cpu" = "powerpc" -o "$target_cpu" = "powerpc64" ; then
 ############################
 
     AC_ARG_ENABLE(altivec,
-	[  --enable-altivec        enable Altivec support (default=auto)],,
+	AC_HELP_STRING([--enable-altivec],[enable Altivec support (default=auto)]),,
 	[ enable_altivec=yes ])
     
     if test "x$enable_altivec" = xyes; then
@@ -276,10 +314,10 @@ if test "$target_cpu" = "powerpc" -o "$target_cpu" = "powerpc64" ; then
 
     dnl -mcpu=7450 does not reliably work with gcc 3.*
     
-    JACK_OPT_CFLAGS="-D_REENTRANT -O2 -mcpu=7400 $ALTIVEC_OPT_FLAGS -mhard-float -mpowerpc-gfxopt"
+    JACK_OPT_CFLAGS="-O2 -mcpu=7400 $ALTIVEC_OPT_FLAGS -mhard-float -mpowerpc-gfxopt"
 
     if test "$target_cpu" = "powerpc64"; then
-	JACK_OPT_CFLAGS="-D_REENTRANT -O2 -mcpu=powerpc64 $ALTIVEC_OPT_FLAGS -mhard-float" 
+	JACK_OPT_CFLAGS="-O2 -mcpu=powerpc64 $ALTIVEC_OPT_FLAGS -mhard-float" 
     fi
 
 elif echo $target_cpu | egrep '(i.86|x86_64)' >/dev/null; then
@@ -294,10 +332,18 @@ elif echo $target_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 	if echo $procflags | grep -s sse ; then
 	    cpu_supports_sse=yes
 	fi
+    else
+	# this is not linux, but assume that if the processor
+	# is x86 then is supports SSE and not MMX
+        cpu_supports_sse=yes
+	AC_MSG_WARN([Assuming your x86/x86_64 system can support SSE. Use --disable-sse if this is not the case])
+        cpu_supports_mmx=no
+	AC_MSG_WARN([Assuming your x86/x86_64 system does not need to use MMX. Use --enable-mmx if this is not the case])
     fi
     
     AC_ARG_ENABLE(optimization-by-compiler,
-	AC_HELP_STRING([--enable-optimization-by-compiler],[use compiler (NOT processor) capabilities to determine optimization flags (default=no)]),,
+	AC_HELP_STRING([--enable-optimization-by-compiler],[use compiler (NOT processor) capabilities to determine optimization flags (default=no)]),
+	optimization_by_compiler=yes,
 	optimization_by_compiler=no
     )
     
@@ -338,35 +384,41 @@ elif echo $target_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 	    AC_MSG_WARN([The assembler does not support the MMX command set.])
 	)
     fi
-        
+
     if test "x$enable_sse" = xyes; then
 	
 	AC_MSG_CHECKING(whether we can compile SSE code)
 	
 	AC_COMPILE_IFELSE([asm ("movntps %xmm0, 0");],
-	    AC_DEFINE(USE_SSE, 1,
-		[Define to 1 if SSE assembly is available.])
-	    
-	    if test x$optimization_by_cpu = xyes ; then
-		if test x$cpu_supports_sse = xyes ; then
+	    [
+		if test x$optimization_by_cpu = xyes ; then
+		    if test x$cpu_supports_sse = xyes ; then
+			SSE_FLAGS="-msse -mfpmath=sse"
+			MMX_FLAGS=""
+		    fi
+		else 
 		    SSE_FLAGS="-msse -mfpmath=sse"
+		    MMX_FLAGS=""
 		fi
-	    else 
-		SSE_FLAGS="-msse -mfpmath=sse"
-	    fi
-	    
-	    AC_MSG_RESULT(yes)
-	    ,
-	    enable_sse=no
-	    AC_MSG_RESULT(no)
-	    AC_MSG_WARN(
-		[The assembler does not support the SSE command set.]
-	    )
-	)
+		
+		AC_MSG_RESULT(yes)
+		],
+	    [
+		enable_sse=no
+		AC_MSG_RESULT(no)
+		AC_MSG_WARN([The assembler does not support the SSE command set.]) 
+		])
     fi
-
+    
     AC_DEFINE(x86, 1, "Nope it's intel")
-    COMMON_X86_OPT_FLAGS="-DREENTRANT -O3 -fomit-frame-pointer -ffast-math -funroll-loops"
+    COMMON_X86_OPT_FLAGS="-O3 -fomit-frame-pointer -ffast-math -funroll-loops"
+
+dnl
+dnl its a little sad that OS X doesn't make it possible to identify 
+dnl the target_cpu a little more precisely. on os x we always get "i386"
+dnl as the CPU type. we miss out on some possible optimizations as 
+dnl a result. oh well.
+dnl     
     
     if test x$with_cpu_target != x ; then
         JACK_OPT_CFLAGS="-march=$with_cpu_target"
@@ -382,7 +434,16 @@ elif echo $target_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 	fi
     fi
 
-    JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS $JACK_OPT_CFLAGS $MMX_FLAGS $SSE_FLAGS"
+dnl
+dnl do not add h/w specific flags if asked to let compiler
+dnl to the optimization
+dnl    
+
+    if test x$optimization_by_compiler != xyes ; then
+        JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS $JACK_OPT_CFLAGS $MMX_FLAGS $SSE_FLAGS"
+    else
+       JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS"
+    fi
 
 fi
 
@@ -393,7 +454,7 @@ AC_ARG_ENABLE(dynsimd,
 if test "x$enable_dynsimd" = xyes; then
 	AC_DEFINE(USE_DYNSIMD, 1, [Define to 1 to use dynamic SIMD selection.])
 	dnl This needs update once there's more than x86/x86-64 supported
-	SIMD_CFLAGS="-msse -msse2 -m3dnow"
+	SIMD_CFLAGS="-O -msse -msse2 -m3dnow"
 	AC_SUBST(SIMD_CFLAGS)
 fi
 
@@ -401,24 +462,34 @@ AC_ARG_ENABLE(optimize,
     AC_HELP_STRING([--enable-optimize],
 	[optimize code, based on CPU or compiler, as separately selected (default=no)]),
     [ if test x$enable_optimize != xno ; then
-	JACK_CFLAGS="$JACK_CORE_CFLAGS $JACK_OPT_CFLAGS"
 	AC_MSG_WARN([optimization in use.........................])
       else
         # no optimization, so lets get debugging symbols instead
 	JACK_OPT_CFLAGS="-g"
-	JACK_CFLAGS="$JACK_CORE_CFLAGS $JACK_OPT_CFLAGS"
 	AC_MSG_WARN([no optimization.........................])
       fi 
+    ],
+    [
+        # no optimization, so lets get debugging symbols instead
+	JACK_OPT_CFLAGS="-g"
+	AC_MSG_WARN([no optimization.........................])
     ]
 )
 
+JACK_CFLAGS="$JACK_CORE_CFLAGS $JACK_OPT_CFLAGS"
+
+dnl
+dnl most makefiles use JACK_CFLAGS, but simd code needs JACK_CORE_CFLAGS
+dnl
+
 AC_SUBST(JACK_CFLAGS)
+AC_SUBST(JACK_CORE_CFLAGS)
 
 dnl
 dnl use JACK_CFLAGS for jackd compilation
 dnl 
 
-CFLAGS=$JACK_CFLAGS
+CFLAGS="$CFLAGS $JACK_CFLAGS"
 
 # allow buffer resizing unless --disable-resize specified
 buffer_resizing=yes
@@ -583,7 +654,7 @@ fi
 HAVE_SAMPLERATE=false
 PKG_CHECK_MODULES(SAMPLERATE, samplerate >= 0.1.2,[HAVE_SAMPLERATE=true], [true])
 if test x$HAVE_SAMPLERATE = xfalse; then
-             AC_MSG_WARN([*** the NetJack backend and internal client will not be built])
+        AC_MSG_WARN([*** the NetJack backend and internal client will not be built])
 else
 	CFLAGS="$CFLAGS $SAMPLERATE_CFLAGS"
 	LIBS="$LIBS $SAMPLERATE_LIBS"
@@ -593,9 +664,12 @@ fi
 HAVE_CELT=false
 PKG_CHECK_MODULES(CELT, celt >= 0.5.0,[HAVE_CELT=true], [true])
 if test x$HAVE_CELT = xfalse; then
-             AC_MSG_WARN([*** NetJack will not be built with celt support])
+    	AC_DEFINE(HAVE_CELT,0,"Whether CELT is available")
+	AC_MSG_RESULT(no)
+        AC_MSG_WARN([*** NetJack will not be built with celt support])
 else
-	CFLAGS="$CFLAGS $CELT_CFLAGS"
+    	AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
+	AC_MSG_RESULT(yes)
 	LIBS="$LIBS $CELT_LIBS"
 fi
 
@@ -763,6 +837,12 @@ AC_DEFINE_UNQUOTED(JACK_DEFAULT_DRIVER,
 	[$JACK_DEFAULT_DRIVER],
 	[Default JACK driver])
 
+JACK_SEMAPHORE_KEY=0x282929
+AC_DEFINE_UNQUOTED(JACK_SEMAPHORE_KEY,
+	  [$JACK_SEMAPHORE_KEY],
+	  [ an integer constant used as the semaphore and SysV SHM key. see libjack/shm.c for usage])
+AC_SUBST(JACK_SEMAPHORE_KEY)
+
 # On some systems, readline depends on termcap or ncurses.  But, the
 # MacOSX linker complains bitterly if these libraries are explicitly
 # referenced.  
@@ -799,6 +879,7 @@ AM_CONDITIONAL(HAVE_READLINE, $HAVE_READLINE)
 AM_CONDITIONAL(HAVE_DOXYGEN, $HAVE_DOXYGEN)
 AM_CONDITIONAL(USE_CAPABILITIES, $USE_CAPABILITIES)
 AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
+AM_CONDITIONAL(HAVE_PPOLL, $HAVE_PPOLL)
 
 SETTINGS_PERSISTENCE_WARNING=
 SETTINGS_PERSISTENCE_USE_LIBXML2=false
@@ -867,6 +948,7 @@ drivers/firewire/Makefile
 drivers/netjack/Makefile
 example-clients/Makefile
 tools/Makefile
+man/Makefile
 jack.pc
 jack.spec
 jack/Makefile
