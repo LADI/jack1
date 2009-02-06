@@ -28,7 +28,6 @@
 #include <jack/transport.h>
 
 #include <netinet/in.h>
-#include <samplerate.h>
 
 typedef struct _net_driver net_driver_t;
 
@@ -42,6 +41,9 @@ struct _net_driver
     jack_nframes_t  sample_rate;
     jack_nframes_t  bitdepth;
     jack_nframes_t  period_size;
+    int		    dont_htonl_floats;
+
+    jack_nframes_t  codec_latency;
 
     unsigned int    listen_port;
 

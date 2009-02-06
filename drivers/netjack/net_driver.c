@@ -43,7 +43,9 @@ $Id: net_driver.c,v 1.17 2006/04/16 20:16:10 torbenh Exp $
 
 #include "config.h"
 
+#if HAVE_SAMPLERATE
 #include <samplerate.h>
+#endif
 
 #if HAVE_CELT
 #include <celt/celt.h>
@@ -391,7 +393,7 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
     unsigned int *packet_buf, *packet_bufX;
 
     if( ! driver->packet_data_valid ) {
-	render_payload_to_jack_ports (driver->bitdepth, NULL, driver->net_period_down, driver->capture_ports, driver->capture_srcs, nframes);
+	render_payload_to_jack_ports (driver->bitdepth, NULL, driver->net_period_down, driver->capture_ports, driver->capture_srcs, nframes, driver->dont_htonl_floats );
 	return 0;
     }
     packet_buf = driver->rx_buf;
@@ -411,6 +413,7 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
 
     // check whether, we should handle the transport sync stuff, or leave trnasports untouched.
     if (driver->handle_transport_sync) {
+	int compensated_tranport_pos = (pkthdr->transport_frame + (pkthdr->latency * nframes) + driver->codec_latency);
 
         // read local transport info....
         local_trans_state = jack_transport_query(driver->client, &local_trans_pos);
@@ -426,11 +429,12 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
                     jack_info("locally stopped... starting...");
                 }
 
-                if (local_trans_pos.frame != (pkthdr->transport_frame + (pkthdr->latency) * nframes)) {
-                    jack_transport_locate(driver->client, (pkthdr->transport_frame + (pkthdr->latency) * nframes));
+                if (local_trans_pos.frame != compensated_tranport_pos)
+		{
+                    jack_transport_locate(driver->client, compensated_tranport_pos);
                     last_transport_state = JackTransportRolling;
                     sync_state = FALSE;
-                    jack_info("starting locate to %d", pkthdr->transport_frame + (pkthdr->latency)*nframes);
+                    jack_info("starting locate to %d", compensated_tranport_pos );
                 }
                 break;
             case JackTransportStopped:
@@ -457,7 +461,7 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
         }
     }
 
-    render_payload_to_jack_ports (driver->bitdepth, packet_bufX, driver->net_period_down, driver->capture_ports, driver->capture_srcs, nframes);
+    render_payload_to_jack_ports (driver->bitdepth, packet_bufX, driver->net_period_down, driver->capture_ports, driver->capture_srcs, nframes, driver->dont_htonl_floats );
 
     return 0;
 }
@@ -486,7 +490,7 @@ net_driver_write (net_driver_t* driver, jack_nframes_t nframes)
     pkthdr->framecnt = driver->expected_framecnt;
 
 
-    render_jack_ports_to_payload(driver->bitdepth, driver->playback_ports, driver->playback_srcs, nframes, packet_bufX, driver->net_period_up);
+    render_jack_ports_to_payload(driver->bitdepth, driver->playback_ports, driver->playback_srcs, nframes, packet_bufX, driver->net_period_up, driver->dont_htonl_floats );
 
     packet_header_hton(pkthdr);
     if (driver->srcaddress_valid)
@@ -544,12 +548,18 @@ net_driver_attach (net_driver_t *driver)
 
 	if( driver->bitdepth == 1000 ) {
 #if HAVE_CELT
+	    celt_int32_t lookahead;
 	    // XXX: memory leak
 	    CELTMode *celt_mode = celt_mode_create( driver->sample_rate, 1, driver->period_size, NULL );
+	    celt_mode_info( celt_mode, CELT_GET_LOOKAHEAD, &lookahead );
+	    driver->codec_latency = 2*lookahead;
+
 	    driver->capture_srcs = jack_slist_append(driver->capture_srcs, celt_decoder_create( celt_mode ) );
 #endif
 	} else {
+#if HAVE_SAMPLERATE 
 	    driver->capture_srcs = jack_slist_append(driver->capture_srcs, src_new(SRC_LINEAR, 1, NULL));
+#endif
 	}
     }
     for (chn = driver->capture_channels_audio; chn < driver->capture_channels; chn++) {
@@ -565,7 +575,6 @@ net_driver_attach (net_driver_t *driver)
 
         driver->capture_ports =
             jack_slist_append (driver->capture_ports, port);
-        //driver->capture_srcs = jack_slist_append(driver->capture_srcs, src_new(SRC_LINEAR, 1, NULL));
     }
 
     port_flags = JackPortIsInput | JackPortIsPhysical | JackPortIsTerminal;
@@ -591,7 +600,9 @@ net_driver_attach (net_driver_t *driver)
 	    driver->playback_srcs = jack_slist_append(driver->playback_srcs, celt_encoder_create( celt_mode ) );
 #endif
 	} else {
+#if HAVE_SAMPLERATE
 	    driver->playback_srcs = jack_slist_append(driver->playback_srcs, src_new(SRC_LINEAR, 1, NULL));
+#endif
 	}
     }
     for (chn = driver->playback_channels_audio; chn < driver->playback_channels; chn++) {
@@ -608,7 +619,6 @@ net_driver_attach (net_driver_t *driver)
 
         driver->playback_ports =
             jack_slist_append (driver->playback_ports, port);
-        //driver->playback_srcs = jack_slist_append(driver->playback_srcs, src_new(SRC_LINEAR, 1, NULL));
     }
 
     jack_activate (driver->client);
@@ -664,7 +674,8 @@ net_driver_new (jack_client_t * client,
                 unsigned int bitdepth,
 		unsigned int use_autoconfig,
 		unsigned int latency,
-		unsigned int redundancy)
+		unsigned int redundancy,
+		int dont_htonl_floats)
 {
     net_driver_t * driver;
     int first_pack_len;
@@ -692,6 +703,7 @@ net_driver_new (jack_client_t * client,
 
     driver->sample_rate = sample_rate;
     driver->period_size = period_size;
+    driver->dont_htonl_floats = dont_htonl_floats;
 
     driver->listen_port   = listen_port;
     driver->last_wait_ust = 0;
@@ -704,6 +716,7 @@ net_driver_new (jack_client_t * client,
     driver->playback_channels_audio = playback_ports;
     driver->playback_channels_midi = playback_ports_midi;
     driver->playback_ports    = NULL;
+    driver->codec_latency = 0;
 
     driver->handle_transport_sync = transport_sync;
     driver->mtu = 1400;
@@ -865,7 +878,7 @@ driver_get_descriptor ()
 
     desc = calloc (1, sizeof (jack_driver_desc_t));
     strcpy (desc->name, "net");
-    desc->nparams = 15;
+    desc->nparams = 16;
 
     params = calloc (desc->nparams, sizeof (jack_driver_param_desc_t));
 
@@ -998,6 +1011,15 @@ driver_get_descriptor ()
             "Send packets N times");
     strcpy (params[i].long_desc, params[i].short_desc);
 
+    i++;
+    strcpy (params[i].name, "no-htonl");
+    params[i].character  = 'H';
+    params[i].type       = JackDriverParamUInt;
+    params[i].value.ui   = 0U;
+    strcpy (params[i].short_desc,
+            "Dont convert samples to network byte order.");
+    strcpy (params[i].long_desc, params[i].short_desc);
+
     desc->params = params;
 
     return desc;
@@ -1022,6 +1044,7 @@ driver_initialize (jack_client_t *client, const JSList * params)
     unsigned int use_autoconfig = 1;
     unsigned int latency = 5;
     unsigned int redundancy = 1;
+    int dont_htonl_floats = 0;
     const JSList * node;
     const jack_driver_param_t * param;
 
@@ -1059,11 +1082,21 @@ driver_initialize (jack_client_t *client, const JSList * params)
                 break;
 
             case 'f':
+#if HAVE_SAMPLERATE
                 resample_factor = param->value.ui;
+#else
+		printf( "not built with libsamplerate support\n" );
+		exit(10);
+#endif
                 break;
 
             case 'u':
+#if HAVE_SAMPLERATE
                 resample_factor_up = param->value.ui;
+#else
+		printf( "not built with libsamplerate support\n" );
+		exit(10);
+#endif
                 break;
 
             case 'b':
@@ -1095,6 +1128,10 @@ driver_initialize (jack_client_t *client, const JSList * params)
             case 'R':
                 redundancy = param->value.ui;
                 break;
+
+            case 'H':
+                dont_htonl_floats = param->value.ui;
+                break;
         }
     }
 
@@ -1103,7 +1140,8 @@ driver_initialize (jack_client_t *client, const JSList * params)
                            sample_rate, period_size,
                            listen_port, handle_transport_sync,
                            resample_factor, resample_factor_up, bitdepth,
-			   use_autoconfig, latency, redundancy);
+			   use_autoconfig, latency, redundancy,
+			   dont_htonl_floats);
 }
 
 void

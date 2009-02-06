@@ -94,6 +94,8 @@ struct _packet_cache
     int mtu;
     struct sockaddr_in master_address;
     int master_address_valid;
+    jack_nframes_t last_framecnt_retreived;
+    int last_framecnt_retreived_valid;
 };
 
 extern packet_cache *global_packcache;
@@ -131,9 +133,9 @@ void packet_header_hton(jacknet_packet_header *pkthdr);
 
 void packet_header_ntoh(jacknet_packet_header *pkthdr);
 
-void render_payload_to_jack_ports(int bitdepth, void *packet_payload, jack_nframes_t net_period_down, JSList *capture_ports, JSList *capture_srcs, jack_nframes_t nframes);
+void render_payload_to_jack_ports(int bitdepth, void *packet_payload, jack_nframes_t net_period_down, JSList *capture_ports, JSList *capture_srcs, jack_nframes_t nframes, int dont_htonl_floats );
 
-void render_jack_ports_to_payload(int bitdepth, JSList *playback_ports, JSList *playback_srcs, jack_nframes_t nframes, void *packet_payload, jack_nframes_t net_period_up);
+void render_jack_ports_to_payload(int bitdepth, JSList *playback_ports, JSList *playback_srcs, jack_nframes_t nframes, void *packet_payload, jack_nframes_t net_period_up, int dont_htonl_floats );
 
 
 // XXX: This is sort of deprecated:
