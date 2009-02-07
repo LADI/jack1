@@ -1,4 +1,5 @@
 MAINTAINERCLEANFILES = Makefile.in jackd.1 jack_md5.h 
+MOSTLYCLEANFILES =
 
 if USE_CAPABILITIES
 CAP_PROGS = jackstart
@@ -97,7 +98,7 @@ $(service_DATA): $(service_in_files) Makefile
 	@sed -e "s|\@bindir\@|$(bindir)|" $< > $@
 
 EXTRA_DIST += $(service_in_files)
-
+MOSTLYCLEANFILES += $(service_DATA)
 endif
 
 dist-hook:
