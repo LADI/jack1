@@ -1105,6 +1105,8 @@ jack_client_open_aux (const char *client_name,
 	client->control = (jack_client_control_t *)
 		jack_shm_addr (&client->control_shm);
 
+	client->control->pid = getpid();
+
 	/* Nobody else needs to access this shared memory any more, so
 	 * destroy it.  Because we have it attached, it won't vanish
 	 * till we exit (and release it).

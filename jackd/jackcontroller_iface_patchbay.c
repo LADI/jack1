@@ -345,7 +345,7 @@ jack_controller_patchbay_client_appeared_callback(
 	client_ptr->id = client_id;
 	INIT_LIST_HEAD(&client_ptr->ports);
 
-	client_ptr->pid = jackctl_get_client_pid(server_context, client_ptr->name);
+	client_ptr->pid = jackctl_get_client_pid(((struct jack_controller *)server_context)->server, client_ptr->name);
 	jack_info("New client '%s' with PID %d", client_ptr->name, client_ptr->pid);
 
 	pthread_mutex_lock(&patchbay_ptr->lock);

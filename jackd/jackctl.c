@@ -1273,9 +1273,9 @@ jackctl_port_registration_notify(
 
 	port_full_name = server_ptr->engine->control->ports[port_id].name;
 
-	client_id = server_ptr->engine->control->ports[port_id].id;
+	client_id = server_ptr->engine->control->ports[port_id].client_id;
 	client = jack_client_internal_by_id(server_ptr->engine, client_id);
-	if (client != NULL)
+	if (client != NULL && client->control->type == ClientExternal)
 	{
 		pid = client->control->pid;
 	}
