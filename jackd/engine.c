@@ -1500,7 +1500,13 @@ jack_server_thread (void *arg)
 
 			jack_client_internal_t* client = (jack_client_internal_t*)(node->data);
 
-			if (client->request_fd < 0 || client->control->dead || client->error >= JACK_ERROR_WITH_SOCKETS) {
+			if (client->request_fd < 0 || client->error >= JACK_ERROR_WITH_SOCKETS) {
+				continue;
+			}
+			if( client->control->dead ) {
+				engine->pfd[engine->pfd_max].fd = client->request_fd;
+				engine->pfd[engine->pfd_max].events = POLLHUP|POLLNVAL;
+				engine->pfd_max++;
 				continue;
 			}
 			engine->pfd[engine->pfd_max].fd = client->request_fd;
@@ -2268,7 +2274,7 @@ jack_run_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		timer->current_wakeup = engine->driver->last_wait_ust;
 		timer->next_wakeup = engine->driver->last_wait_ust +
 			engine->driver->period_usecs;
-		
+
 		timer->reset_pending = 0;
 
 	} else {

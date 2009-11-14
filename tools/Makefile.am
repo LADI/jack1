@@ -1,17 +1,5 @@
 MAINTAINERCLEANFILES    = Makefile.in
 
-if HAVE_SNDFILE
-JACKREC = jackrec
-dist-check-sndfile:
-else
-JACKREC =
-dist-check-sndfile:
-	@echo
-	@echo ' ******' You need sndfile installed to make dist.' ******'
-	@echo
-	@false
-endif
-
 if HAVE_READLINE
 JACK_TRANSPORT = jack_transport
 dist-check-readline:
@@ -24,15 +12,15 @@ dist-check-readline:
 	@false
 endif
 
-if HAVE_SAMPLERATE
 NETJACK_TOOLS = jack_netsource
+
+if HAVE_SAMPLERATE
 if HAVE_ALSA
 NETJACK_TOOLS += alsa_in alsa_out
 endif
-dist-check-readline:
+dist-check-samplerate:
 else
-NETJACK_TOOLS =
-dist-check-readline:
+dist-check-samplerate:
 	@echo
 	@echo ' ******' You need libsamplerate installed to make dist.' ******'
 	@echo
@@ -48,7 +36,9 @@ bin_PROGRAMS = jack_load \
 	       jack_freewheel \
 	       jack_evmon \
 	       jack_alias \
-	       $(JACKREC) \
+	       jack_bufsize \
+	       jack_samplerate \
+	       jack_wait \
 	       $(JACK_TRANSPORT) \
 	       $(NETJACK_TOOLS)
 
@@ -82,6 +72,10 @@ jack_thread_wait_SOURCES = tw.c
 jack_thread_wait_LDFLAGS = @OS_LDFLAGS@
 jack_thread_wait_LDADD = $(top_builddir)/libjack/libjack.la
 
+jack_wait_SOURCES = wait.c
+jack_wait_LDFLAGS = @OS_LDFLAGS@
+jack_wait_LDADD = $(top_builddir)/libjack/libjack.la
+
 jack_evmon_SOURCES = evmon.c
 jack_evmon_LDFLAGS = @OS_LDFLAGS@
 jack_evmon_LDADD = $(top_builddir)/libjack/libjack.la
@@ -98,11 +92,13 @@ jack_freewheel_SOURCES = freewheel.c
 jack_freewheel_LDFLAGS = @OS_LDFLAGS@
 jack_freewheel_LDADD = $(top_builddir)/libjack/libjack.la
 
-if HAVE_SNDFILE
-jackrec_SOURCES = capture_client.c
-jackrec_LDFLAGS = @SNDFILE_LIBS@ @OS_LDFLAGS@
-jackrec_LDADD = $(top_builddir)/libjack/libjack.la
-endif
+jack_bufsize_SOURCES = bufsize.c
+jack_bufsize_LDFLAGS = @OS_LDFLAGS@
+jack_bufsize_LDADD = $(top_builddir)/libjack/libjack.la
+
+jack_samplerate_SOURCES = samplerate.c
+jack_samplerate_LDFLAGS = @OS_LDFLAGS@
+jack_samplerate_LDADD = $(top_builddir)/libjack/libjack.la
 
 if HAVE_READLINE
 jack_transport_SOURCES = transport.c
@@ -126,22 +122,22 @@ jack_unload_LDADD = $(top_builddir)/libjack/libjack.la
 # Netjack slave tools
 #
 jack_netsource_SOURCES = netsource.c $(top_builddir)/drivers/netjack/netjack_packet.c
-jack_netsource_CFLAGS = -I$(top_srcdir)/drivers/netjack
-jack_netsource_LDFLAGS = @OS_LDFLAGS@
+jack_netsource_CFLAGS = @NETJACK_CFLAGS@ -I$(top_srcdir)/drivers/netjack
+jack_netsource_LDFLAGS = @NETJACK_LIBS@ @OS_LDFLAGS@ 
 jack_netsource_LDADD = $(top_builddir)/libjack/libjack.la
 
 if HAVE_SAMPLERATE
 if HAVE_ALSA
-alsa_in_SOURCES = alsa_in.c time_smoother.c
+alsa_in_SOURCES = alsa_in.c $(top_builddir)/drivers/alsa/memops.c
+alsa_in_CFLAGS = @NETJACK_CFLAGS@ -I$(top_builddir)/drivers/alsa
 alsa_in_LDFLAGS = -lasound -lsamplerate @OS_LDFLAGS@
 alsa_in_LDADD = $(top_builddir)/libjack/libjack.la
 
-alsa_out_SOURCES = alsa_out.c time_smoother.c
+alsa_out_SOURCES = alsa_out.c $(top_builddir)/drivers/alsa/memops.c
+alsa_out_CFLAGS = @NETJACK_CFLAGS@ -I$(top_builddir)/drivers/alsa
 alsa_out_LDFLAGS = -lasound -lsamplerate @OS_LDFLAGS@
 alsa_out_LDADD = $(top_builddir)/libjack/libjack.la
 endif #HAVE_ALSA
 endif #HAVE_SAMPLERATE
 
-EXTRA_DIST = time_smoother.h
-
-dist-hook: dist-check-sndfile
+# XXX ? dist-hook: dist-check-sndfile dist-check-samplerate

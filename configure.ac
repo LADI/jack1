@@ -3,6 +3,51 @@ dnl $Id$
 
 AC_INIT(jackd/jackd.c)
 
+
+dnl
+dnl Check for existing JACK installs
+dnl 
+
+AC_MSG_CHECKING([existing, conflicting JACK installs])
+not_overwriting=0
+installs=
+for dir in /usr/lib /usr/local/lib /opt/lib ; do
+    if test -d $dir ; then
+	if test $(find $dir/ -name 'libjack.*' 2>/dev/null | wc -l) -gt 0 ; then
+	    if echo $prefix/lib | grep -vs $dir >/dev/null 2>&1 ; then
+		not_overwriting=$(expr $not_overwriting + 1)
+	    fi
+	    installs="$installs $dir"
+	fi	    
+    fi
+done
+
+if test $not_overwriting -gt 0 ; then
+    echo 
+    echo
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "You appear to have at least one existing installation of JACK."
+    echo
+    echo "Complete or partial JACK installs exist in:$installs"
+    echo 
+    echo "Installing this version will leave at least one of these"
+    echo "existing installations installed and this will probably break"
+    echo "JACK on your machine. "
+    echo
+    echo "Before building, you should first remove the existing JACK"
+    echo "installation(s). "
+    echo
+    echo "Alternatively use ./configure --prefix=... to force overwriting"
+    echo "the existing install."
+    echo
+    echo "WARNING: ON ANY DEBIAN-DERIVED DISTRIBUTION (Debian, Ubuntu etc)"
+    echo "CHANGING THE INSTALLATION PREFIX WILL NOT PRODUCE A WORKING JACK"
+    echo "INSTALL. Please contact the distribution packager for JACK and"
+    echo "ask them to fix their packaging."
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    exit 1
+fi
+
 AC_CONFIG_AUX_DIR(config)
 AC_CANONICAL_TARGET
 
@@ -16,8 +61,8 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=116
-JACK_MICRO_VERSION=2
+JACK_MINOR_VERSION=117
+JACK_MICRO_VERSION=0
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
@@ -69,7 +114,6 @@ AC_SUBST(JACK_VERSION)
 AC_SUBST(JACK_RELEASE)
 
 AM_INIT_AUTOMAKE(jack-audio-connection-kit,${JACK_VERSION})
-AM_MAINTAINER_MODE
 
 dnl
 dnl save any user-provided CFLAGS so we can forget
@@ -657,23 +701,37 @@ if test x$HAVE_SAMPLERATE = xfalse; then
         AC_MSG_WARN([*** the NetJack backend and internal client will not be built])
     	AC_DEFINE(HAVE_SAMPLERATE,0,"Whether libsamplerate is available")
 else
-	CFLAGS="$CFLAGS $SAMPLERATE_CFLAGS"
-	LIBS="$LIBS $SAMPLERATE_LIBS"
+	NETJACK_CFLAGS="$NETJACK_CFLAGS $SAMPLERATE_CFLAGS"
+	NETJACK_LIBS="$NETJACK_LIBS $SAMPLERATE_LIBS"
     	AC_DEFINE(HAVE_SAMPLERATE,1,"Whether libsamplerate is available")
 fi
 
 # Celt low-latency audio codec. netjack transmission via internet.
 HAVE_CELT=false
-PKG_CHECK_MODULES(CELT, celt >= 0.5.0,[HAVE_CELT=true], [true])
+PKG_CHECK_MODULES(CELT, celt >= 0.7.0,[HAVE_CELT=true], [true])
 if test x$HAVE_CELT = xfalse; then
-    	AC_DEFINE(HAVE_CELT,0,"Whether CELT is available")
-	AC_MSG_RESULT(no)
-        AC_MSG_WARN([*** NetJack will not be built with celt support])
+	PKG_CHECK_MODULES(CELT, celt >= 0.5.0,[HAVE_CELT=true], [true])
+	if test x$HAVE_CELT = xfalse; then
+		AC_DEFINE(HAVE_CELT,0,"Whether CELT is available")
+		AC_MSG_RESULT(no)
+		AC_MSG_WARN([*** NetJack will not be built with celt support])
+	else
+		AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
+		AC_DEFINE(HAVE_CELT_API_0_5,1,"Whether CELT API is 0.5 API")
+		AC_DEFINE(HAVE_CELT_API_0_7,0,"Whether CELT API is 0.7 API")
+		AC_MSG_RESULT(yes (0.5))
+		NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
+	fi
 else
     	AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
-	AC_MSG_RESULT(yes)
-	LIBS="$LIBS $CELT_LIBS"
+	AC_MSG_RESULT(yes (0.7))
+	AC_DEFINE(HAVE_CELT_API_0_5,0,"Whether CELT API is 0.5 API")
+	AC_DEFINE(HAVE_CELT_API_0_7,1,"Whether CELT API is 0.7 API")
+	NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
 fi
+
+AC_SUBST(NETJACK_LIBS)
+AC_SUBST(NETJACK_CFLAGS)
 
 # Note: A bug in pkg-config causes problems if the first occurence of
 # PKG_CHECK_MODULES can be disabled. So, if you're going to use
@@ -974,7 +1032,6 @@ echo \| Build with OSS support................................ : $HAVE_OSS
 echo \| Build with Sun audio support.......................... : $HAVE_SUN
 echo \| Build with CoreAudio support.......................... : $HAVE_COREAUDIO
 echo \| Build with PortAudio support.......................... : $HAVE_PA
-echo \| Build with NetJack support............................ : $HAVE_SAMPLERATE
 echo \| Build with Celt support............................... : $HAVE_CELT
 echo \| Build with dynamic buffer size support................ : $buffer_resizing
 echo \| Compiler optimization flags........................... : $JACK_OPT_CFLAGS

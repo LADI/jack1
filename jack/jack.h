@@ -32,7 +32,28 @@ extern "C" {
 
 /**
  * Note: More documentation can be found in jack/types.h.
+
  */
+
+/*************************************************************
+ * NOTE: JACK_WEAK_EXPORT ***MUST*** be used on every function
+ * added to the JACK API after the 0.116.2 release.
+ *************************************************************/
+
+#ifndef JACK_WEAK_EXPORT
+#ifdef __GNUC__
+/* JACK_WEAK_EXPORT needs to be a macro which
+   expands into a compiler directive. If non-null, the directive 
+   must tell the compiler to arrange for weak linkage of 
+   the symbol it used with. For this to work full may
+   require linker arguments in the client as well.
+*/
+#define JACK_WEAK_EXPORT __attribute__((weak))
+#else
+/* Add other things here for non-gcc platforms */
+#endif
+#endif
+
 
 /**
  * @defgroup ClientFunctions Creating & manipulating clients
@@ -208,9 +229,7 @@ void jack_cycle_signal (jack_client_t* client, int status);
  * execution. That means that it cannot call functions that might
  * block for a long time. This includes malloc, free, printf,
  * pthread_mutex_lock, sleep, wait, poll, select, pthread_join,
- * pthread_cond_wait, etc, etc. See
- * http://jackit.sourceforge.net/docs/design/design.html#SECTION00411000000000000000
- * for more information.
+ * pthread_cond_wait, etc, etc. 
  *
  * @return 0 on success, otherwise a non-zero error code.
 */    
@@ -255,9 +274,40 @@ int jack_set_thread_init_callback (jack_client_t *client,
  * NOTE: clients do not need to call this.  It exists only
  * to help more complex clients understand what is going
  * on.  It should be called before jack_client_activate().
+ * 
+ * NOTE: if a client calls this AND jack_on_info_shutdown(), then
+ * the event of a client thread shutdown, the callback 
+ * passed to this function will not be called, and the one passed to
+ * jack_on_info_shutdown() will.
  */
 void jack_on_shutdown (jack_client_t *client,
-		       void (*function)(void *arg), void *arg);
+		       JackShutdownCallback function, void *arg);
+
+/**
+ * @param client pointer to JACK client structure.
+ * @param function The jack_shutdown function pointer.
+ * @param arg The arguments for the jack_shutdown function.
+ *
+ * Register a function (and argument) to be called if and when the
+ * JACK server shuts down the client thread.  The function must
+ * be written as if it were an asynchonrous POSIX signal
+ * handler --- use only async-safe functions, and remember that it
+ * is executed from another thread.  A typical function might
+ * set a flag or write to a pipe so that the rest of the
+ * application knows that the JACK client thread has shut
+ * down.
+ *
+ * NOTE: clients do not need to call this.  It exists only
+ * to help more complex clients understand what is going
+ * on.  It should be called before jack_client_activate().
+ *
+ * NOTE: if a client calls this AND jack_on_shutdown(), then in the
+ * event of a client thread shutdown, the callback   passed to 
+ * this function will be called, and the one passed to
+ * jack_on_shutdown() will not.
+ */
+void jack_on_info_shutdown (jack_client_t *client,
+			    JackInfoShutdownCallback function, void *arg) JACK_WEAK_EXPORT;
 
 /**
  * Tell the Jack server to call @a process_callback whenever there is
@@ -267,9 +317,7 @@ void jack_on_shutdown (jack_client_t *client,
  * execution. That means that it cannot call functions that might
  * block for a long time. This includes malloc, free, printf,
  * pthread_mutex_lock, sleep, wait, poll, select, pthread_join,
- * pthread_cond_wait, etc, etc. See
- * http://jackit.sourceforge.net/docs/design/design.html#SECTION00411000000000000000
- * for more information.
+ * pthread_cond_wait, etc, etc. 
  *
  * @return 0 on success, otherwise a non-zero error code, causing JACK
  * to remove that client from the process() graph.
@@ -508,15 +556,7 @@ int jack_port_unregister (jack_client_t *, jack_port_t *);
  * zero-filled. if there are multiple inbound connections, the data
  * will be mixed appropriately.  
  *
- * FOR OUTPUT PORTS ONLY : WILL BE DEPRECATED in Jack 2.0 !!
- * ---------------------------------------------------------
- * You may cache the value returned, but only between calls to
- * your "blocksize" callback. For this reason alone, you should
- * either never cache the return value or ensure you have
- * a "blocksize" callback and be sure to invalidate the cached
- * address from there.
- *
- * Caching output ports is DEPRECATED in Jack 2.0, due to some new optimization (like "pipelining").
+ * Do not cache the returned address across process() callbacks.
  * Port buffers have to be retrieved in each callback for proper functionning.
  */
 void *jack_port_get_buffer (jack_port_t *, jack_nframes_t);
@@ -865,47 +905,57 @@ jack_port_t *jack_port_by_id (jack_client_t *client,
 /**
  * @defgroup TimeFunctions Handling time
  * @{
+ *
+ * JACK time is in units of 'frames', according to the current sample rate.
+ * The absolute value of frame times is meaningless, frame times have meaning
+ * only relative to each other.
  */
 
 /**
- * @return the time in frames that has passed since the JACK server
- * began the current process cycle.
+ * @return the estimated time in frames that has passed since the JACK
+ * server began the current process cycle.
  */
 jack_nframes_t jack_frames_since_cycle_start (const jack_client_t *);
 
 /**
- * @return an estimate of the current time in frames.  This is a
- * running counter, no significance should be attached to its value,
- * but it can be compared to a previously returned value.
+ * @return the estimated current time in frames.
+ * This function is intended for use in other threads (not the process
+ * callback).  The return value can be compared with the value of
+ * jack_last_frame_time to relate time in other threads to JACK time.
  */
 jack_nframes_t jack_frame_time (const jack_client_t *);
 
 /**
- * @return the frame_time after the last processing of the graph
- * this is only to be used from the process callback. 
- *
- * This function can be used to put timestamps generated by 
- * jack_frame_time() in correlation to the current process cycle.
+ * @return the precise time at the start of the current process cycle.
+ * This function may only be used from the process callback, and can
+ * be used to interpret timestamps generated by jack_frame_time() in
+ * other threads with respect to the current process cycle.
+ * 
+ * This is the only jack time function that returns exact time:
+ * when used during the process callback it always returns the same
+ * value (until the next process callback, where it will return
+ * that value + nframes, etc).  The return value is guaranteed to be
+ * monotonic and linear in this fashion unless an xrun occurs.
+ * If an xrun occurs, clients must check this value again, as time
+ * may have advanced in a non-linear way (e.g. cycles may have been skipped).
  */
 jack_nframes_t jack_last_frame_time (const jack_client_t *client);
 
 /**
- * @return estimated time in microseconds of the specified frame time
+ * @return the estimated time in microseconds of the specified frame time
  */
 jack_time_t jack_frames_to_time(const jack_client_t *client, jack_nframes_t);
 
 /**
- * @return estimated time in frames for the specified system time.
+ * @return the estimated time in frames for the specified system time.
  */
 jack_nframes_t jack_time_to_frames(const jack_client_t *client, jack_time_t);
 
 /**
  * @return return JACK's current system time in microseconds,
- *         using JACK clock source. 
+ *         using the JACK clock source. 
  * 
  * The value returned is guaranteed to be monotonic, but not linear.
- *
- * This function is a client version of jack_get_microseconds().
  */
 jack_time_t jack_get_time();
 
@@ -949,6 +999,15 @@ extern void (*jack_info_callback)(const char *msg);
  */
 void jack_set_info_function (void (*func)(const char *));
 /*@}*/
+
+/**
+ * The free function to be used on memory returned by jack_port_get_connections, 
+ * jack_port_get_all_connections and jack_get_ports functions.
+ * This is MANDATORY on Windows when otherwise all nasty runtime version related crashes can occur.
+ * Developers are strongly encouraged to use this function instead of the standard "free" function in new code.
+ *
+ */
+void jack_free(void* ptr);
 
 #ifdef __cplusplus
 }

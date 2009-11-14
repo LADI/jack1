@@ -4,45 +4,22 @@
  * as they would be used by many applications.
  */
 
-#define _ISOC99_SOURCE  1
-#define _XOPEN_SOURCE   600
-
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
-#include <alloca.h>
 #include <math.h>
 
 #include <jack/jack.h>
 #include <jack/jslist.h>
+#include <jack/memops.h>
 
-#define ALSA_PCM_OLD_HW_PARAMS_API
-#define ALSA_PCM_OLD_SW_PARAMS_API
 #include "alsa/asoundlib.h"
 
 #include <samplerate.h>
-#include "time_smoother.h"
-
-#define SAMPLE_16BIT_SCALING  32767.0f
-#define SAMPLE_16BIT_MAX  32767
-#define SAMPLE_16BIT_MIN  -32767
-#define NORMALIZED_FLOAT_MIN -1.0f
-#define NORMALIZED_FLOAT_MAX  1.0f
-#define f_round(f) lrintf(f)
-
-#define float_16(s, d)\
-	if ((s) <= NORMALIZED_FLOAT_MIN) {\
-		(d) = SAMPLE_16BIT_MIN;\
-	} else if ((s) >= NORMALIZED_FLOAT_MAX) {\
-		(d) = SAMPLE_16BIT_MAX;\
-	} else {\
-		(d) = f_round ((s) * SAMPLE_16BIT_SCALING);\
-	}
-
-typedef signed short ALSASAMPLE;
 
 // Here are the lists of the jack ports...
 
@@ -52,17 +29,20 @@ JSList	   *playback_ports = NULL;
 JSList	   *playback_srcs = NULL;
 jack_client_t *client;
 
-// TODO: make the sample format configurable soon...
-snd_pcm_format_t format = SND_PCM_FORMAT_S16;	 /* sample format */
-
 snd_pcm_t *alsa_handle;
 
 int jack_sample_rate;
+int jack_buffer_size;
 
-double current_resample_factor = 1.0;
-int periods_until_stability = 10;
+double resample_mean = 1.0;
+double static_resample_factor = 1.0;
 
-time_smoother *smoother;
+double *offset_array;
+double *window_array;
+int offset_differential_index = 0;
+
+double offset_integral = 0;
+int quit = 0;
 
 // ------------------------------------------------------ commandline parameters
 
@@ -73,30 +53,58 @@ int num_periods = 2;
 
 int target_delay = 0;	    /* the delay which the program should try to approach. */
 int max_diff = 0;	    /* the diff value, when a hard readpointer skip should occur */
-int catch_factor = 1000;
+int catch_factor = 100000;
+int catch_factor2 = 10000;
+double pclamp = 15.0;
+double controlquant = 10000.0;
+int smooth_size = 256;
+int good_window=0;
+int verbose = 0;
+int instrument = 0;
+int samplerate_quality = 2;
 
 // Debug stuff:
 
-int print_counter = 10;
-
-volatile float output_resampling_factor = 0.0;
+volatile float output_resampling_factor = 1.0;
 volatile int output_new_delay = 0;
 volatile float output_offset = 0.0;
+volatile float output_integral = 0.0;
 volatile float output_diff = 0.0;
 
+snd_pcm_uframes_t real_buffer_size;
+snd_pcm_uframes_t real_period_size;
+
+// format selection, and corresponding functions from memops in a nice set of structs.
+
+typedef struct alsa_format {
+	snd_pcm_format_t format_id;
+	size_t sample_size;
+	void (*jack_to_soundcard) (char *dst, jack_default_audio_sample_t *src, unsigned long nsamples, unsigned long dst_skip, dither_state_t *state);
+	void (*soundcard_to_jack) (jack_default_audio_sample_t *dst, char *src, unsigned long nsamples, unsigned long src_skip);
+	const char *name;
+} alsa_format_t;
+
+alsa_format_t formats[] = {
+	{ SND_PCM_FORMAT_FLOAT_LE, 4, sample_move_dS_floatLE, sample_move_floatLE_sSs, "float" },
+	{ SND_PCM_FORMAT_S32, 4, sample_move_d32u24_sS, sample_move_dS_s32u24, "32bit" },
+	{ SND_PCM_FORMAT_S24, 4, sample_move_d24_sS, sample_move_dS_s24, "24bit" },
+	{ SND_PCM_FORMAT_S16, 2, sample_move_d16_sS, sample_move_dS_s16, "16bit" }
+};
+#define NUMFORMATS (sizeof(formats)/sizeof(formats[0]))
+int format=0;
 
 // Alsa stuff... i dont want to touch this bullshit in the next years.... please...
 
 static int xrun_recovery(snd_pcm_t *handle, int err) {
-    //printf( "xrun !!!....\n" );
+//    printf( "xrun !!!.... %d\n", err );
 	if (err == -EPIPE) {	/* under-run */
 		err = snd_pcm_prepare(handle);
 		if (err < 0)
 			printf("Can't recovery from underrun, prepare failed: %s\n", snd_strerror(err));
 		return 0;
-	} else if (err == -ESTRPIPE) {
+	} else if (err == -EAGAIN) {
 		while ((err = snd_pcm_resume(handle)) == -EAGAIN)
-			sleep(1);	/* wait until the suspend flag is released */
+			usleep(100);	/* wait until the suspend flag is released */
 		if (err < 0) {
 			err = snd_pcm_prepare(handle);
 			if (err < 0)
@@ -107,8 +115,29 @@ static int xrun_recovery(snd_pcm_t *handle, int err) {
 	return err;
 }
 
+static int set_hwformat( snd_pcm_t *handle, snd_pcm_hw_params_t *params )
+{
+	int i;
+	int err;
+
+	for( i=0; i<NUMFORMATS; i++ ) {
+		/* set the sample format */
+		err = snd_pcm_hw_params_set_format(handle, params, formats[i].format_id);
+		if (err == 0) {
+			format = i;
+			return 0;
+		}
+	}
+
+	return err;
+}
+
 static int set_hwparams(snd_pcm_t *handle, snd_pcm_hw_params_t *params, snd_pcm_access_t access, int rate, int channels, int period, int nperiods ) {
 	int err, dir=0;
+	unsigned int buffer_time;
+	unsigned int period_time;
+	unsigned int rrate;
+	unsigned int rchannels;
 
 	/* choose all parameters */
 	err = snd_pcm_hw_params_any(handle, params);
@@ -122,46 +151,65 @@ static int set_hwparams(snd_pcm_t *handle, snd_pcm_hw_params_t *params, snd_pcm_
 		printf("Access type not available for playback: %s\n", snd_strerror(err));
 		return err;
 	}
+
 	/* set the sample format */
-	err = snd_pcm_hw_params_set_format(handle, params, format);
+	err = set_hwformat(handle, params);
 	if (err < 0) {
 		printf("Sample format not available for playback: %s\n", snd_strerror(err));
 		return err;
 	}
 	/* set the count of channels */
-	err = snd_pcm_hw_params_set_channels(handle, params, channels);
+	rchannels = channels;
+	err = snd_pcm_hw_params_set_channels_near(handle, params, &rchannels);
 	if (err < 0) {
 		printf("Channels count (%i) not available for record: %s\n", channels, snd_strerror(err));
 		return err;
 	}
+	if (rchannels != channels) {
+		printf("WARNING: chennel count does not match (requested %d got %d)\n", channels, rchannels);
+		num_channels = rchannels;
+	}
 	/* set the stream rate */
-	err = snd_pcm_hw_params_set_rate_near(handle, params, rate, 0);
+	rrate = rate;
+	err = snd_pcm_hw_params_set_rate_near(handle, params, &rrate, 0);
 	if (err < 0) {
 		printf("Rate %iHz not available for playback: %s\n", rate, snd_strerror(err));
 		return err;
 	}
-	if (err != rate) {
-		printf("Rate doesn't match (requested %iHz, get %iHz)\n", rate, err);
+	if (rrate != rate) {
+		printf("Rate doesn't match (requested %iHz, get %iHz)\n", rate, rrate);
 		return -EINVAL;
 	}
 	/* set the buffer time */
-	err = snd_pcm_hw_params_set_buffer_time_near(handle, params, 1000000*period*nperiods/rate, &dir);
+
+	buffer_time = 1000000*period*nperiods/rate;
+	err = snd_pcm_hw_params_set_buffer_time_near(handle, params, &buffer_time, &dir);
 	if (err < 0) {
 		printf("Unable to set buffer time %i for playback: %s\n",  1000000*period*nperiods/rate, snd_strerror(err));
 		return err;
 	}
-	if( snd_pcm_hw_params_get_buffer_size(params) != nperiods * period ) {
-	    printf( "WARNING: buffer size does not match: (requested %d, got %d)\n", nperiods * period, (int) snd_pcm_hw_params_get_buffer_size(params) );
+	err = snd_pcm_hw_params_get_buffer_size( params, &real_buffer_size );
+	if (err < 0) {
+		printf("Unable to get buffer size back: %s\n", snd_strerror(err));
+		return err;
+	}
+	if( real_buffer_size != nperiods * period ) {
+	    printf( "WARNING: buffer size does not match: (requested %d, got %d)\n", nperiods * period, (int) real_buffer_size );
 	}
 	/* set the period time */
-	err = snd_pcm_hw_params_set_period_time_near(handle, params, 1000000*period/rate, &dir);
+	period_time = 1000000*period/rate;
+	err = snd_pcm_hw_params_set_period_time_near(handle, params, &period_time, &dir);
 	if (err < 0) {
 		printf("Unable to set period time %i for playback: %s\n", 1000000*period/rate, snd_strerror(err));
 		return err;
 	}
-	int ps = snd_pcm_hw_params_get_period_size(params, NULL );
-	if( ps != period ) {
-	    printf( "WARNING: period size does not match: (requested %i, got %i)\n", period, ps );
+	err = snd_pcm_hw_params_get_period_size(params, &real_period_size, NULL );
+	if (err < 0) {
+		printf("Unable to get period size back: %s\n", snd_strerror(err));
+		return err;
+	}
+	if( real_period_size != period ) {
+	    printf( "WARNING: period size does not match: (requested %i, got %i)\n", period, (int)real_period_size );
 	}
 	/* write the parameters to device */
 	err = snd_pcm_hw_params(handle, params);
@@ -241,15 +289,18 @@ static snd_pcm_t *open_audiofd( char *device_name, int capture, int rate, int ch
   //snd_pcm_start( handle );
   //snd_pcm_wait( handle, 200 );
   int num_null_samples = nperiods * period * channels;
-  ALSASAMPLE *tmp = alloca( num_null_samples * sizeof( ALSASAMPLE ) ); 
-  memset( tmp, 0, num_null_samples * sizeof( ALSASAMPLE ) );
+  char *tmp = alloca( num_null_samples * formats[format].sample_size ); 
+  memset( tmp, 0, num_null_samples * formats[format].sample_size );
   snd_pcm_writei( handle, tmp, num_null_samples );
   
 
   return handle;
 }
 
-jack_nframes_t soundcard_frames = 0;
+double hann( double x )
+{
+	return 0.5 * (1.0 - cos( 2*M_PI * x ) );
+}
 
 /**
  * The process callback for this JACK application.
@@ -257,110 +308,108 @@ jack_nframes_t soundcard_frames = 0;
  */
 int process (jack_nframes_t nframes, void *arg) {
 
-    ALSASAMPLE *outbuf;
-    float *floatbuf, *resampbuf;
+    char *outbuf;
+    float *resampbuf;
     int rlen;
     int err;
-    snd_pcm_sframes_t delay;
-    jack_nframes_t this_frame_time;
-    jack_nframes_t this_soundcard_time;
-    int dont_adjust_resampling_factor = 0;
-    double a, b;
+    snd_pcm_sframes_t delay = target_delay;
+    int i;
 
-    double offset;
-    double diff_value;
+    delay = (num_periods*period_size)-snd_pcm_avail( alsa_handle ) ;
 
-    snd_pcm_delay( alsa_handle, &delay );
-    this_frame_time = jack_frame_time(client);
-    this_soundcard_time = soundcard_frames + delay;
-
-    time_smoother_put( smoother, this_frame_time, this_soundcard_time );
-
+    delay -= jack_frames_since_cycle_start( client );
+    delay += jack_get_buffer_size( client ) / 2;
     // Do it the hard way.
     // this is for compensating xruns etc...
 
     if( delay > (target_delay+max_diff) ) {
 	snd_pcm_rewind( alsa_handle, delay - target_delay );
-	soundcard_frames -= (delay-target_delay);
 	output_new_delay = (int) delay;
-	dont_adjust_resampling_factor = 1;
-	//snd_pcm_delay( alsa_handle, &delay );
+
 	delay = target_delay;
-	// XXX: at least set it to that value.
-	//current_resample_factor = (double) sample_rate / (double) jack_sample_rate;
-	current_resample_factor = (double) jack_sample_rate / (double) sample_rate;
-	periods_until_stability = 10;
+
+	// Set the resample_rate... we need to adjust the offset integral, to do this.
+	// first look at the PI controller, this code is just a special case, which should never execute once
+	// everything is swung in. 
+	offset_integral = - (resample_mean - static_resample_factor) * catch_factor * catch_factor2;
+	// Also clear the array. we are beginning a new control cycle.
+	for( i=0; i<smooth_size; i++ )
+		offset_array[i] = 0.0;
     }
     if( delay < (target_delay-max_diff) ) {
-	ALSASAMPLE *tmp = alloca( (target_delay-delay) * sizeof( ALSASAMPLE ) * num_channels ); 
-	memset( tmp, 0, sizeof( ALSASAMPLE ) * num_channels * (target_delay-delay) );
+	char *tmp = alloca( (target_delay-delay) * formats[format].sample_size * num_channels ); 
+	memset( tmp, 0,  formats[format].sample_size * num_channels * (target_delay-delay) );
 	snd_pcm_writei( alsa_handle, tmp, target_delay-delay );
-	soundcard_frames += (target_delay-delay);
+
 	output_new_delay = (int) delay;
-	dont_adjust_resampling_factor = 1;
-	//snd_pcm_delay( alsa_handle, &delay );
+
 	delay = target_delay;
-	// XXX: at least set it to that value.
-	//current_resample_factor = (double) sample_rate / (double) jack_sample_rate;
-	current_resample_factor = (double) jack_sample_rate / (double) sample_rate;
-	periods_until_stability = 10;
+
+	// Set the resample_rate... we need to adjust the offset integral, to do this.
+	offset_integral = - (resample_mean - static_resample_factor) * catch_factor * catch_factor2;
+	// Also clear the array. we are beginning a new control cycle.
+	for( i=0; i<smooth_size; i++ )
+		offset_array[i] = 0.0;
     }
     /* ok... now we should have target_delay +- max_diff on the alsa side.
      *
      * calculate the number of frames, we want to get.
      */
 
-    //if( periods_until_stability ) {
-    if( 1 ) {
-	double resamp_rate = (double)jack_sample_rate / (double)sample_rate;  // == nframes / alsa_samples.
-	double request_samples = nframes / resamp_rate;  //== alsa_samples;
-	//double request_samples = nframes * current_resample_factor;  //== alsa_samples;
+    double offset = delay - target_delay;
 
-	offset = delay - target_delay;
+    // Save offset.
+    offset_array[(offset_differential_index++)% smooth_size ] = offset;
 
-	//double frlen = request_samples - offset / catch_factor;
-	double frlen = request_samples - offset;
+    // Build the mean of the windowed offset array
+    // basically fir lowpassing.
+    double smooth_offset = 0.0;
+    for( i=0; i<smooth_size; i++ )
+	    smooth_offset +=
+		    offset_array[ (i + offset_differential_index-1) % smooth_size] * window_array[i];
+    smooth_offset /= (double) smooth_size;
 
-	double compute_factor = frlen / (double) nframes;
-	//double compute_factor = (double) nframes / frlen;
+    // this is the integral of the smoothed_offset
+    offset_integral += smooth_offset;
 
-	diff_value =  pow(current_resample_factor - compute_factor, 3) / (double) catch_factor;
-	current_resample_factor -= diff_value;
-	periods_until_stability -= 1;
-    }
-    else
-    {
-	time_smoother_get_linear_params( smoother, this_frame_time, this_soundcard_time, jack_get_sample_rate(client)/4,
-		&a, &b );
+    // Clamp offset.
+    // the smooth offset still contains unwanted noise
+    // which would go straigth onto the resample coeff.
+    // it only used in the P component and the I component is used for the fine tuning anyways.
+    if( fabs( smooth_offset ) < pclamp )
+	    smooth_offset = 0.0;
 
-	if( dont_adjust_resampling_factor ) {
-	    current_resample_factor = 1.0/( b - a/(double)nframes/(double)catch_factor );
-	    //double delay_diff = (double)delay - (double)target_delay;
-	    //current_resample_factor = 1.0/( b + a/(double)nframes - delay_diff/(double)nframes/(double)catch_factor );
-	} else
-	    current_resample_factor = 1.0/b;
+    // ok. now this is the PI controller. 
+    // u(t) = K * ( e(t) + 1/T \int e(t') dt' )
+    // K = 1/catch_factor and T = catch_factor2
+    double current_resample_factor = static_resample_factor - smooth_offset / (double) catch_factor - offset_integral / (double) catch_factor / (double)catch_factor2;
 
-	offset = delay - target_delay;
-	diff_value = b;
-    }
+    // now quantize this value around resample_mean, so that the noise which is in the integral component doesnt hurt.
+    current_resample_factor = floor( (current_resample_factor - resample_mean) * controlquant + 0.5 ) / controlquant + resample_mean;
 
-
+    // Output "instrumentatio" gonna change that to real instrumentation in a few.
     output_resampling_factor = (float) current_resample_factor;
-    output_diff = (float) diff_value;
+    output_diff = (float) smooth_offset;
+    output_integral = (float) offset_integral;
     output_offset = (float) offset;
 
+    // Clamp a bit.
     if( current_resample_factor < 0.25 ) current_resample_factor = 0.25;
     if( current_resample_factor > 4 ) current_resample_factor = 4;
+
+    // Now Calculate how many samples we need.
     rlen = ceil( ((double)nframes) * current_resample_factor )+2;
-    assert( rlen > 10 );
+    assert( rlen > 2 );
+
+    // Calculate resample_mean so we can init ourselves to saner values.
+    resample_mean = 0.9999 * resample_mean + 0.0001 * current_resample_factor;
     /*
      * now this should do it...
      */
 
-    outbuf = alloca( rlen * sizeof( ALSASAMPLE ) * num_channels );
+    outbuf = alloca( rlen * formats[format].sample_size * num_channels );
 
-    floatbuf = alloca( rlen * sizeof( float ) );
-    resampbuf = alloca( nframes * sizeof( float ) );
+    resampbuf = alloca( rlen * sizeof( float ) );
     /*
      * render jack ports to the outbuf...
      */
@@ -369,9 +418,9 @@ int process (jack_nframes_t nframes, void *arg) {
     JSList *node = playback_ports;
     JSList *src_node = playback_srcs;
     SRC_DATA src;
+
     while ( node != NULL)
     {
-	int i;
 	jack_port_t *port = (jack_port_t *) node->data;
 	float *buf = jack_port_get_buffer (port, nframes);
 
@@ -388,9 +437,7 @@ int process (jack_nframes_t nframes, void *arg) {
 
 	src_process( src_state, &src );
 
-	for (i=0; i < rlen; i++) {
-	    float_16( resampbuf[i], outbuf[chn+ i*num_channels] );
-	}
+	formats[format].jack_to_soundcard( outbuf + format[formats].sample_size * chn, resampbuf, src.output_frames_gen, num_channels*format[formats].sample_size, NULL);
 
 	src_node = jack_slist_next (src_node);
 	node = jack_slist_next (node);
@@ -398,25 +445,17 @@ int process (jack_nframes_t nframes, void *arg) {
     }
 
     // now write the output...
-
 again:
   err = snd_pcm_writei(alsa_handle, outbuf, src.output_frames_gen);
+  //err = snd_pcm_writei(alsa_handle, outbuf, src.output_frames_gen);
   if( err < 0 ) {
       printf( "err = %d\n", err );
       if (xrun_recovery(alsa_handle, err) < 0) {
-	  //printf("Write error: %s\n", snd_strerror(err));
-	  //exit(EXIT_FAILURE);
+	  printf("Write error: %s\n", snd_strerror(err));
+	  exit(EXIT_FAILURE);
       }
       goto again;
   }
-  soundcard_frames += err;
-
-//  if( err != rlen ) {
-//      printf( "write = %d\n", rlen );
-//  }
-
-
-
 
     return 0;      
 }
@@ -428,7 +467,7 @@ again:
 
 void alloc_ports( int n_capture, int n_playback ) {
 
-    int port_flags = JackPortIsOutput;
+    int port_flags = JackPortIsOutput | JackPortIsPhysical | JackPortIsTerminal;
     int chn;
     jack_port_t *port;
     char buf[32];
@@ -448,7 +487,7 @@ void alloc_ports( int n_capture, int n_playback ) {
 	    break;
 	}
 
-	capture_srcs = jack_slist_append( capture_srcs, src_new( SRC_SINC_FASTEST, 1, NULL ) );
+	capture_srcs = jack_slist_append( capture_srcs, src_new( 4-samplerate_quality, 1, NULL ) );
 	capture_ports = jack_slist_append (capture_ports, port);
     }
 
@@ -469,7 +508,7 @@ void alloc_ports( int n_capture, int n_playback ) {
 	    break;
 	}
 
-	playback_srcs = jack_slist_append( playback_srcs, src_new( SRC_SINC_FASTEST, 1, NULL ) );
+	playback_srcs = jack_slist_append( playback_srcs, src_new( 4-samplerate_quality, 1, NULL ) );
 	playback_ports = jack_slist_append (playback_ports, port);
     }
 }
@@ -494,15 +533,17 @@ void jack_shutdown (void *arg) {
 void printUsage() {
 fprintf(stderr, "usage: alsa_out [options]\n"
 		"\n"
-		"  -j <jack name> - reports a different name to jack\n"
+		"  -j <jack name> - client name\n"
 		"  -d <alsa_device> \n"
 		"  -c <channels> \n"
 		"  -p <period_size> \n"
 		"  -n <num_period> \n"
 		"  -r <sample_rate> \n"
+		"  -q <sample_rate quality [0..4]\n"
 		"  -m <max_diff> \n"
 		"  -t <target_delay> \n"
-		"  -f <catch_factor> \n"
+		"  -i  turns on instrumentation\n"
+		"  -v  turns on printouts\n"
 		"\n");
 }
 
@@ -510,6 +551,12 @@ fprintf(stderr, "usage: alsa_out [options]\n"
 /**
  * the main function....
  */
+
+void
+sigterm_handler( int signal )
+{
+	quit = 1;
+}
 
 
 int main (int argc, char *argv[]) {
@@ -521,7 +568,7 @@ int main (int argc, char *argv[]) {
     int errflg=0;
     int c;
 
-    while ((c = getopt(argc, argv, ":j:r:c:p:n:d:m:t:f:")) != -1) {
+    while ((c = getopt(argc, argv, "ivj:r:c:p:n:d:q:m:t:f:F:C:Q:s:")) != -1) {
 	switch(c) {
 	    case 'j':
 		strcpy(jack_name,optarg);
@@ -544,11 +591,32 @@ int main (int argc, char *argv[]) {
 	    case 't':
 		target_delay = atoi(optarg);
 		break;
+	    case 'q':
+		samplerate_quality = atoi(optarg);
+		break;
 	    case 'm':
 		max_diff = atoi(optarg);
 		break;
 	    case 'f':
 		catch_factor = atoi(optarg);
+		break;
+	    case 'F':
+		catch_factor2 = atoi(optarg);
+		break;
+	    case 'C':
+		pclamp = (double) atoi(optarg);
+		break;
+	    case 'Q':
+		controlquant = (double) atoi(optarg);
+		break;
+	    case 'v':
+		verbose = 1;
+		break;
+	    case 'i':
+		instrument = 1;
+		break;
+	    case 's':
+		smooth_size = atoi(optarg);
 		break;
 	    case ':':
 		fprintf(stderr,
@@ -566,22 +634,11 @@ int main (int argc, char *argv[]) {
 	exit(2);
     }
 
-    // Setup target delay and max_diff for the normal user, who does not play with them...
-
-    if( !target_delay ) 
-	target_delay = num_periods*period_size / 2;
-
-    if( !max_diff )
-	max_diff = period_size / 2;	
-
-    smoother = time_smoother_new( 100 );
-    if( !smoother ) {
-	fprintf (stderr, "no memory\n");
-	return 10;
+    if( (samplerate_quality < 0) || (samplerate_quality > 4) ) {
+	fprintf (stderr, "invalid samplerate quality\n");
+	return 1;
     }
-
-
-    if ((client = jack_client_new (jack_name)) == 0) {
+    if ((client = jack_client_open (jack_name, 0, NULL)) == 0) {
 	fprintf (stderr, "jack server not running?\n");
 	return 1;
     }
@@ -600,9 +657,6 @@ int main (int argc, char *argv[]) {
     jack_on_shutdown (client, jack_shutdown, 0);
 
 
-    // alloc input ports, which are blasted out to alsa...
-    alloc_ports( 0, num_channels );
-
     // get jack sample_rate
     
     jack_sample_rate = jack_get_sample_rate( client );
@@ -610,13 +664,51 @@ int main (int argc, char *argv[]) {
     if( !sample_rate )
 	sample_rate = jack_sample_rate;
 
-    current_resample_factor = (double) sample_rate / (double) jack_sample_rate;
+    static_resample_factor =  (double) sample_rate / (double) jack_sample_rate;
+    resample_mean = static_resample_factor;
+
+    offset_array = malloc( sizeof(double) * smooth_size );
+    if( offset_array == NULL ) {
+	    fprintf( stderr, "no memory for offset_array !!!\n" );
+	    exit(20);
+    }
+    window_array = malloc( sizeof(double) * smooth_size );
+    if( window_array == NULL ) {
+	    fprintf( stderr, "no memory for window_array !!!\n" );
+	    exit(20);
+    }
+    int i;
+    for( i=0; i<smooth_size; i++ ) {
+	    offset_array[i] = 0.0;
+	    window_array[i] = hann( (double) i / ((double) smooth_size - 1.0) );
+    }
+
+    jack_buffer_size = jack_get_buffer_size( client );
+    // Setup target delay and max_diff for the normal user, who does not play with them...
+    if( !target_delay ) 
+	target_delay = (num_periods*period_size / 2) - jack_buffer_size/2;
+
+    if( !max_diff )
+	max_diff = target_delay;	
+
+    if( max_diff > target_delay ) {
+	    fprintf( stderr, "target_delay (%d) cant be smaller than max_diff(%d)\n", target_delay, max_diff );
+	    exit(20);
+    }
+    if( (target_delay+max_diff) > (num_periods*period_size) ) {
+	    fprintf( stderr, "target_delay+max_diff (%d) cant be bigger than buffersize(%d)\n", target_delay+max_diff, num_periods*period_size );
+	    exit(20);
+    }
     // now open the alsa fd...
-    
     alsa_handle = open_audiofd( alsa_device, 0, sample_rate, num_channels, period_size, num_periods);
-    if( alsa_handle < 0 )
+    if( alsa_handle == 0 )
 	exit(20);
-    
+
+    printf( "selected sample format: %s\n", formats[format].name );
+
+    // alloc input ports, which are blasted out to alsa...
+    alloc_ports( 0, num_channels );
+
 
     /* tell the JACK server that we are ready to roll */
 
@@ -625,15 +717,37 @@ int main (int argc, char *argv[]) {
 	return 1;
     }
 
-    while(1) {
-	usleep(500000);
-	if( output_new_delay ) {
-	    printf( "delay = %d\n", output_new_delay );
-	    output_new_delay = 0;
-	}
-	printf( "res: %f, \tdiff = %f, \toffset = %f \n", output_resampling_factor, output_diff, output_offset );
-	
+    signal( SIGTERM, sigterm_handler );
+    signal( SIGINT, sigterm_handler );
+
+    if( verbose ) {
+	    while(!quit) {
+		    usleep(500000);
+		    if( output_new_delay ) {
+			    printf( "delay = %d\n", output_new_delay );
+			    output_new_delay = 0;
+		    }
+		    printf( "res: %f, \tdiff = %f, \toffset = %f \n", output_resampling_factor, output_diff, output_offset );
+	    }
+    } else if( instrument ) {
+	    printf( "# n\tresamp\tdiff\toffseti\tintegral\n");
+	    int n=0;
+	    while(!quit) {
+		    usleep(1000);
+		    printf( "%d\t%f\t%f\t%f\t%f\n", n++, output_resampling_factor, output_diff, output_offset, output_integral );
+	    }
+    } else {
+	    while(!quit)
+	    {
+		    usleep(500000);
+		    if( output_new_delay ) {
+			    printf( "delay = %d\n", output_new_delay );
+			    output_new_delay = 0;
+		    }
+	    }
     }
+
+    jack_deactivate( client );
     jack_client_close (client);
     exit (0);
 }

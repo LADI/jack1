@@ -56,7 +56,7 @@ static JSList *drivers = NULL;
 static sigset_t signals;
 static jack_engine_t *engine = NULL;
 static char *server_name = NULL;
-static int realtime = 0;
+static int realtime = 1;
 static int realtime_priority = 10;
 static int do_mlock = 1;
 static int temporary = 0;
@@ -352,7 +352,7 @@ jack_drivers_load ()
 static void copyright (FILE* file)
 {
 	fprintf (file, "jackd " VERSION "\n"
-"Copyright 2001-2005 Paul Davis and others.\n"
+"Copyright 2001-2009 Paul Davis, Stephane Letz, Jack O'Quinn, Torben Hohn and others.\n"
 "jackd comes with ABSOLUTELY NO WARRANTY\n"
 "This is free software, and you are welcome to redistribute it\n"
 "under certain conditions; see the file COPYING for details\n\n");
@@ -362,13 +362,16 @@ static void usage (FILE *file)
 {
 	copyright (file);
 	fprintf (file, "\n"
-"usage: jackd [ --realtime OR -R [ --realtime-priority OR -P priority ] ]\n"
+"usage: jackd [ --no-realtime OR -L ]\n"
+"             [ --realtime OR -R [ --realtime-priority OR -P priority ] ]\n"
+"      (the two previous arguments are mutually exclusive. The default is --realtime)\n"
 "             [ --name OR -n server-name ]\n"
 "             [ --no-mlock OR -m ]\n"
 "             [ --unlock OR -u ]\n"
 "             [ --timeout OR -t client-timeout-in-msecs ]\n"
 "             [ --port-max OR -p maximum-number-of-ports]\n"
 "             [ --debug-timer OR -D ]\n"
+"             [ --no-sanity-checks OR -N ]\n"
 "             [ --verbose OR -v ]\n"
 "             [ --clocksource OR -c [ c(ycle) | h(pet) | s(ystem) ]\n"
 "             [ --replace-registry OR -r ]\n"
@@ -376,8 +379,11 @@ static void usage (FILE *file)
 "             [ --version OR -V ]\n"
 "             [ --nozombies OR -Z ]\n"
 "         -d backend [ ... backend args ... ]\n"
-"             The backend can be `alsa', `coreaudio', `dummy',\n"
-"                                `freebob', `oss', `sun', or `portaudio'.\n\n"
+#ifdef __APPLE__
+"             Available backends may include: coreaudio, dummy, netjack, portaudio.\n\n"
+#else 
+"             Available backends may include: alsa, dummy, freebob, firewire, netjack, oss, sun, or portaudio.\n\n"
+#endif
 "       jackd -d backend --help\n"
 "             to display options for each backend\n\n");
 }	
@@ -509,25 +515,29 @@ main (int argc, char *argv[])
 
 {
 	jack_driver_desc_t * desc;
-	const char *options = "-ad:P:uvshVRZTFlt:mn:p:c:";
+	const char *options = "-ad:P:uvshVRLZTFlt:mn:Np:c:";
 	struct option long_options[] = 
 	{ 
+		/* keep ordered by single-letter option code */
+
+		{ "clock-source", 1, 0, 'c' },
 		{ "driver", 1, 0, 'd' },
-		{ "verbose", 0, 0, 'v' },
 		{ "help", 0, 0, 'h' },
 		{ "tmpdir-location", 0, 0, 'l' },
-		{ "port-max", 1, 0, 'p' },
+		{ "no-realtime", 0, 0, 'L' },
 		{ "no-mlock", 0, 0, 'm' },
 		{ "name", 1, 0, 'n' },
-		{ "unlock", 0, 0, 'u' },
+                { "no-sanity-checks", 0, 0, 'N' },
+		{ "port-max", 1, 0, 'p' },
+		{ "realtime-priority", 1, 0, 'P' },
 		{ "realtime", 0, 0, 'R' },
 		{ "replace-registry", 0, 0, 'r' },
-		{ "realtime-priority", 1, 0, 'P' },
+		{ "silent", 0, 0, 's' },
 		{ "timeout", 1, 0, 't' },
 		{ "temporary", 0, 0, 'T' },
+		{ "unlock", 0, 0, 'u' },
 		{ "version", 0, 0, 'V' },
-		{ "silent", 0, 0, 's' },
-		{ "clock-source", 1, 0, 'c' },
+		{ "verbose", 0, 0, 'v' },
 		{ "nozombies", 0, 0, 'Z' },
 		{ 0, 0, 0, 0 }
 	};
@@ -540,6 +550,7 @@ main (int argc, char *argv[])
 	int driver_nargs = 1;
 	int show_version = 0;
 	int replace_registry = 0;
+	int do_sanity_checks = 1;
 	int i;
 	int rc;
 
@@ -580,12 +591,20 @@ main (int argc, char *argv[])
 			printf ("%s\n", jack_tmpdir);
 			exit (0);
 
+		case 'L':
+			realtime = 0;
+			break;
+
 		case 'm':
 			do_mlock = 0;
 			break;
 
 		case 'n':
 			server_name = optarg;
+			break;
+
+		case 'N':
+			do_sanity_checks = 0;
 			break;
 
 		case 'p':
@@ -601,6 +620,7 @@ main (int argc, char *argv[])
 			break;
 
 		case 'R':
+			/* this is now the default */
 			realtime = 1;
 			break;
 
@@ -640,6 +660,10 @@ main (int argc, char *argv[])
 			usage (stdout);
 			return -1;
 		}
+	}
+
+	if (do_sanity_checks && (0 < sanitycheck (realtime, (clock_source == JACK_TIMER_CYCLE_COUNTER)))) {
+		return -1;
 	}
 
 	if (show_version) {

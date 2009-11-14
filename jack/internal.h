@@ -58,6 +58,9 @@ extern void jack_info (const char *fmt, ...);
 #include <jack/types.h>
 #include <jack/port.h>
 #include <jack/transport.h>
+#include <jack/thread.h>
+
+extern jack_thread_creator_t jack_thread_creator;
 
 typedef enum {
 	JACK_TIMER_SYSTEM_CLOCK,
@@ -77,6 +80,14 @@ const char* jack_clock_source_name (jack_timer_type_t);
 #endif
 
 #include <jack/messagebuffer.h>
+
+#ifndef PATH_MAX
+    #ifdef MAXPATHLEN
+	#define PATH_MAX MAXPATHLEN
+    #else
+	#define PATH_MAX 1024
+    #endif /* MAXPATHLEN */
+#endif /* !PATH_MAX */
 
 #ifdef DEBUG_ENABLED
 
