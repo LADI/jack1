@@ -65,3 +65,9 @@ tools/jack_thread_wait
 tools/jack_transport
 tools/jack_unload
 tools/jackrec
+man/jack_netsource.1
+man/jack_samplerate.1
+man/jack_wait.1
+tools/jack_bufsize
+tools/jack_samplerate
+tools/jack_wait
