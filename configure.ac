@@ -61,7 +61,7 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=117
+JACK_MINOR_VERSION=118
 JACK_MICRO_VERSION=0
 
 dnl ---
@@ -876,8 +876,8 @@ AC_ARG_ENABLE(alsa, AC_HELP_STRING([--disable-alsa],[ignore ALSA driver ]),
 HAVE_ALSA="false"
 if test "x$TRY_ALSA" = "xyes"
 then
-	# check for ALSA >= 1.0.0
-	PKG_CHECK_MODULES(ALSA, alsa >= 1.0.0,
+	# check for ALSA >= 1.0.18
+	PKG_CHECK_MODULES(ALSA, alsa >= 1.0.18,
 	     [HAVE_ALSA="true"
               ALSA_LIBS=-lasound
               JACK_DEFAULT_DRIVER=\"alsa\"
