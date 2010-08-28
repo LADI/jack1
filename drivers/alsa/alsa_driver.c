@@ -863,8 +863,11 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 	driver->poll_timeout = (int) floor (1.5f * driver->period_usecs);
 
 	if (driver->engine) {
-		driver->engine->set_buffer_size (driver->engine,
-						 driver->frames_per_cycle);
+		if (driver->engine->set_buffer_size (driver->engine,
+						     driver->frames_per_cycle)) {
+			jack_error ("ALSA: Cannot set engine buffer size to %d (check MIDI)", driver->frames_per_cycle);
+			return -1;
+		}
 	}
 
 	return 0;
@@ -1453,21 +1456,18 @@ alsa_driver_null_cycle (alsa_driver_t* driver, jack_nframes_t nframes)
 	if (nframes > driver->frames_per_cycle) {
 		return -1;
 	}
-	
-	if (driver->capture_handle) {
+
+        if (driver->capture_handle) {
 		nf = nframes;
 		offset = 0;
 		while (nf) {
 			contiguous = nf;
 			
-			if (snd_pcm_mmap_begin (
-				    driver->capture_handle,
-				    &driver->capture_areas,
-				    (snd_pcm_uframes_t *) &offset, 
-				    (snd_pcm_uframes_t *) &contiguous)) {
-				return -1;
-			}
-		
+                        if (alsa_driver_get_channel_addresses (driver,
+                                                               &contiguous, 0, &offset, 0)) {
+                                return -1;
+                        }
+
 			if (snd_pcm_mmap_commit (driver->capture_handle,
 						 offset, contiguous) < 0) {
 				return -1;
@@ -1483,14 +1483,11 @@ alsa_driver_null_cycle (alsa_driver_t* driver, jack_nframes_t nframes)
 		while (nf) {
 			contiguous = nf;
 			
-			if (snd_pcm_mmap_begin (
-				    driver->playback_handle,
-				    &driver->playback_areas,
-				    (snd_pcm_uframes_t *) &offset, 
-				    (snd_pcm_uframes_t *) &contiguous)) {
-				return -1;
-			}
-			
+                        if (alsa_driver_get_channel_addresses (driver,
+                                                               0, &contiguous, 0, &offset)) {
+                                return -1;
+                        }
+
 			for (chn = 0; chn < driver->playback_nchannels; chn++) {
 				alsa_driver_silence_on_channel (driver, chn,
 								contiguous);
@@ -1733,7 +1730,10 @@ alsa_driver_attach (alsa_driver_t *driver)
 	jack_port_t *port;
 	int port_flags;
 
-	driver->engine->set_buffer_size (driver->engine, driver->frames_per_cycle);
+	if (driver->engine->set_buffer_size (driver->engine, driver->frames_per_cycle)) {
+		jack_error ("ALSA: cannot set engine buffer size for %d (check MIDI)", driver->frames_per_cycle);
+		return -1;
+	}
 	driver->engine->set_sample_rate (driver->engine, driver->frame_rate);
 
 	port_flags = JackPortIsOutput|JackPortIsPhysical|JackPortIsTerminal;

@@ -13,7 +13,7 @@ not_overwriting=0
 installs=
 for dir in /usr/lib /usr/local/lib /opt/lib ; do
     if test -d $dir ; then
-	if test $(find $dir/ -name 'libjack.*' 2>/dev/null | wc -l) -gt 0 ; then
+	if test $(find $dir/ -name 'libjack.so.*' 2>/dev/null | wc -l) -gt 0 ; then
 	    if echo $prefix/lib | grep -vs $dir >/dev/null 2>&1 ; then
 		not_overwriting=$(expr $not_overwriting + 1)
 	    fi
@@ -61,7 +61,7 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=118
+JACK_MINOR_VERSION=119
 JACK_MICRO_VERSION=0
 
 dnl ---
@@ -881,7 +881,7 @@ then
 	     [HAVE_ALSA="true"
               ALSA_LIBS=-lasound
               JACK_DEFAULT_DRIVER=\"alsa\"
-             ], AC_MSG_RESULT([no]), [-lm]
+             ], AC_MSG_RESULT([no - cannot find ALSA 1.0.18 or later]), [-lm]
 	)
 	AC_SUBST(ALSA_LIBS)
 fi
@@ -998,6 +998,7 @@ doc/reference.doxygen
 drivers/Makefile
 drivers/alsa/Makefile
 drivers/alsa-midi/Makefile
+drivers/a2j/Makefile
 drivers/dummy/Makefile
 drivers/oss/Makefile
 drivers/sun/Makefile

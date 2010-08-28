@@ -50,9 +50,10 @@ $Id: net_driver.c,v 1.17 2006/04/16 20:16:10 torbenh Exp $
 #include <netinet/in.h>
 #endif
 
+#include "config.h"
+
 #include "netjack.h"
 
-#include "config.h"
 
 #if HAVE_SAMPLERATE
 #include <samplerate.h>
@@ -95,7 +96,7 @@ int netjack_wait( netjack_driver_state_t *netj )
     jacknet_packet_header *pkthdr;
 
     if( !netj->next_deadline_valid ) {
-	    netj->next_deadline = jack_get_time() + netj->deadline_offset;
+	    netj->next_deadline = jack_get_time() + netj->period_usecs;
 	    netj->next_deadline_valid = 1;
     }
 
@@ -105,8 +106,8 @@ int netjack_wait( netjack_driver_state_t *netj )
 	netj->expected_framecnt += 1;
     } else {
 	// starting up.... lets look into the packetcache, and fetch the highest packet.
-	packet_cache_drain_socket( global_packcache, netj->sockfd );
-	if( packet_cache_get_highest_available_framecnt( global_packcache, &next_frame_avail ) ) {
+	packet_cache_drain_socket( netj->packcache, netj->sockfd );
+	if( packet_cache_get_highest_available_framecnt( netj->packcache, &next_frame_avail ) ) {
 	    netj->expected_framecnt = next_frame_avail;
 	    netj->expected_framecnt_valid = 1;
 	} else {
@@ -122,7 +123,7 @@ int netjack_wait( netjack_driver_state_t *netj )
     // then poll (have deadline calculated)
     // then drain socket, rinse and repeat.
     while(1) {
-	if( packet_cache_get_next_available_framecnt( global_packcache, netj->expected_framecnt, &next_frame_avail) ) {
+	if( packet_cache_get_next_available_framecnt( netj->packcache, netj->expected_framecnt, &next_frame_avail) ) {
 	    if( next_frame_avail == netj->expected_framecnt ) {
 		we_have_the_expected_frame = 1;
 		if( !netj->always_deadline )
@@ -133,13 +134,13 @@ int netjack_wait( netjack_driver_state_t *netj )
 	    break;
 	}
 
-	packet_cache_drain_socket( global_packcache, netj->sockfd );
+	packet_cache_drain_socket( netj->packcache, netj->sockfd );
     }
 
     // check if we know who to send our packets too.
     if (!netj->srcaddress_valid)
-	if( global_packcache->master_address_valid ) {
-	    memcpy (&(netj->syncsource_address), &(global_packcache->master_address), sizeof( struct sockaddr_in ) );
+	if( netj->packcache->master_address_valid ) {
+	    memcpy (&(netj->syncsource_address), &(netj->packcache->master_address), sizeof( struct sockaddr_in ) );
 	    netj->srcaddress_valid = 1;
 	}
 
@@ -161,14 +162,14 @@ int netjack_wait( netjack_driver_state_t *netj )
 	else
 		netj->time_to_deadline = 0;
 
-	packet_cache_retreive_packet_pointer( global_packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize , &packet_recv_time_stamp);
+	packet_cache_retreive_packet_pointer( netj->packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize , &packet_recv_time_stamp);
 	pkthdr = (jacknet_packet_header *) netj->rx_buf;
 	packet_header_ntoh(pkthdr);
 	netj->deadline_goodness = (int)pkthdr->sync_state;
 	netj->packet_data_valid = 1;
 
 	int want_deadline;
-	if( netj->jitter_val != 0 ) 
+	if( netj->jitter_val != 0 )
 		want_deadline = netj->jitter_val;
 	else if( netj->latency < 4 )
 		want_deadline = -netj->period_usecs/2;
@@ -177,23 +178,23 @@ int netjack_wait( netjack_driver_state_t *netj )
 
 	if( netj->deadline_goodness != MASTER_FREEWHEELS ) {
 		if( netj->deadline_goodness < want_deadline ) {
-			netj->deadline_offset -= netj->period_usecs/100;
+			netj->next_deadline -= netj->period_usecs/100;
 			//jack_log( "goodness: %d, Adjust deadline: --- %d\n", netj->deadline_goodness, (int) netj->period_usecs*netj->latency/100 );
 		}
 		if( netj->deadline_goodness > want_deadline ) {
-			netj->deadline_offset += netj->period_usecs/100;
+			netj->next_deadline += netj->period_usecs/100;
 			//jack_log( "goodness: %d, Adjust deadline: +++ %d\n", netj->deadline_goodness, (int) netj->period_usecs*netj->latency/100 );
 		}
 	}
-	if( netj->deadline_offset < (netj->period_usecs*70/100) ) {
-		jack_error( "master is forcing deadline_offset to below 70%% of period_usecs... increase latency setting on master" );
-		netj->deadline_offset = (netj->period_usecs*90/100);
-	}
+//	if( netj->next_deadline < (netj->period_usecs*70/100) ) {
+//		jack_error( "master is forcing deadline_offset to below 70%% of period_usecs... increase latency setting on master" );
+//		netj->deadline_offset = (netj->period_usecs*90/100);
+//	}
 
-	netj->next_deadline = jack_get_time() + netj->deadline_offset;
+	netj->next_deadline += netj->period_usecs;
     } else {
 	netj->time_to_deadline = 0;
-	netj->next_deadline = jack_get_time() + netj->deadline_offset;
+	netj->next_deadline += netj->period_usecs;
 	// bah... the packet is not there.
 	// either
 	// - it got lost.
@@ -203,7 +204,7 @@ int netjack_wait( netjack_driver_state_t *netj )
 	// lets check if we have the next packets, we will just run a cycle without data.
 	// in that case.
 
-	if( packet_cache_get_next_available_framecnt( global_packcache, netj->expected_framecnt, &next_frame_avail) )
+	if( packet_cache_get_next_available_framecnt( netj->packcache, netj->expected_framecnt, &next_frame_avail) )
 	{
 	    jack_nframes_t offset = next_frame_avail - netj->expected_framecnt;
 
@@ -221,7 +222,7 @@ int netjack_wait( netjack_driver_state_t *netj )
 
 		// I also found this happening, when the packet queue, is too full.
 		// but wtf ? use a smaller latency. this link can handle that ;S
-		if( packet_cache_get_fill( global_packcache, netj->expected_framecnt ) > 80.0 )
+		if( packet_cache_get_fill( netj->packcache, netj->expected_framecnt ) > 80.0 )
 		    netj->next_deadline -= netj->period_usecs/2;
 
 
@@ -229,7 +230,7 @@ int netjack_wait( netjack_driver_state_t *netj )
 		// the diff is too high. but we have a packet in the future.
 		// lets resync.
 		netj->expected_framecnt = next_frame_avail;
-		packet_cache_retreive_packet_pointer( global_packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize, NULL );
+		packet_cache_retreive_packet_pointer( netj->packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize, NULL );
 		pkthdr = (jacknet_packet_header *) netj->rx_buf;
 		packet_header_ntoh(pkthdr);
 		//netj->deadline_goodness = 0;
@@ -257,7 +258,7 @@ int netjack_wait( netjack_driver_state_t *netj )
 		// i will make the packet cache drop redundant packets,
 		// that have already been retreived.
 		//
-		if( packet_cache_get_highest_available_framecnt( global_packcache, &next_frame_avail) ) {
+		if( packet_cache_get_highest_available_framecnt( netj->packcache, &next_frame_avail) ) {
 		    if( next_frame_avail == (netj->expected_framecnt - 1) ) {
 			// Ok. the last packet is there now.
 			// and it had not been retrieved.
@@ -277,9 +278,9 @@ int netjack_wait( netjack_driver_state_t *netj )
 
 		// But now we can check for any new frame available.
 		//
-		if( packet_cache_get_highest_available_framecnt( global_packcache, &next_frame_avail) ) {
+		if( packet_cache_get_highest_available_framecnt( netj->packcache, &next_frame_avail) ) {
 		    netj->expected_framecnt = next_frame_avail;
-		    packet_cache_retreive_packet_pointer( global_packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize, NULL );
+		    packet_cache_retreive_packet_pointer( netj->packcache, netj->expected_framecnt, (char **) &(netj->rx_buf), netj->rx_bufsize, NULL );
 		    pkthdr = (jacknet_packet_header *) netj->rx_buf;
 		    packet_header_ntoh(pkthdr);
 		    netj->deadline_goodness = pkthdr->sync_state;
@@ -300,7 +301,7 @@ int netjack_wait( netjack_driver_state_t *netj )
 		    // reply address changes port.
 		    if (netj->num_lost_packets > 200 ) {
 			netj->srcaddress_valid = 0;
-			packet_cache_reset_master_address( global_packcache );
+			packet_cache_reset_master_address( netj->packcache );
 		    }
 		}
 	    }
@@ -369,6 +370,21 @@ void netjack_attach( netjack_driver_state_t *netj )
     int port_flags;
 
 
+    if( netj->bitdepth == CELT_MODE ) 
+    {
+#if HAVE_CELT
+#if HAVE_CELT_API_0_7
+	    celt_int32 lookahead;
+	    netj->celt_mode = celt_mode_create( netj->sample_rate, netj->period_size, NULL );
+#else
+	    celt_int32_t lookahead;
+	    netj->celt_mode = celt_mode_create( netj->sample_rate, 1, netj->period_size, NULL );
+#endif
+	    celt_mode_info( netj->celt_mode, CELT_GET_LOOKAHEAD, &lookahead );
+	    netj->codec_latency = 2*lookahead;
+#endif
+    }
+
     if (netj->handle_transport_sync)
         jack_set_sync_callback(netj->client, (JackSyncCallback) net_driver_sync_cb, NULL);
 
@@ -391,16 +407,10 @@ void netjack_attach( netjack_driver_state_t *netj )
 	if( netj->bitdepth == CELT_MODE ) {
 #if HAVE_CELT
 #if HAVE_CELT_API_0_7
-	    celt_int32 lookahead;
-	    CELTMode *celt_mode = celt_mode_create( netj->sample_rate, netj->period_size, NULL );
-	    netj->capture_srcs = jack_slist_append(netj->capture_srcs, celt_decoder_create( celt_mode, 1, NULL ) );
+	    netj->capture_srcs = jack_slist_append(netj->capture_srcs, celt_decoder_create( netj->celt_mode, 1, NULL ) );
 #else
-	    celt_int32_t lookahead;
-	    CELTMode *celt_mode = celt_mode_create( netj->sample_rate, 1, netj->period_size, NULL );
-	    netj->capture_srcs = jack_slist_append(netj->capture_srcs, celt_decoder_create( celt_mode ) );
+	    netj->capture_srcs = jack_slist_append(netj->capture_srcs, celt_decoder_create( netj->celt_mode ) );
 #endif
-	    celt_mode_info( celt_mode, CELT_GET_LOOKAHEAD, &lookahead );
-	    netj->codec_latency = 2*lookahead;
 #endif
 	} else {
 #if HAVE_SAMPLERATE
@@ -408,6 +418,7 @@ void netjack_attach( netjack_driver_state_t *netj )
 #endif
 	}
     }
+
     for (chn = netj->capture_channels_audio; chn < netj->capture_channels; chn++) {
         snprintf (buf, sizeof(buf) - 1, "capture_%u", chn + 1);
 
@@ -479,7 +490,6 @@ void netjack_detach( netjack_driver_state_t *netj )
 {
     JSList * node;
 
-
     for (node = netj->capture_ports; node; node = jack_slist_next (node))
         jack_port_unregister (netj->client,
                               ((jack_port_t *) node->data));
@@ -487,12 +497,57 @@ void netjack_detach( netjack_driver_state_t *netj )
     jack_slist_free (netj->capture_ports);
     netj->capture_ports = NULL;
 
+    for (node = netj->capture_srcs; node; node = jack_slist_next (node))
+    {
+#if HAVE_CELT
+        if( netj->bitdepth == CELT_MODE )
+        {
+            CELTDecoder * decoder = node->data;
+            celt_decoder_destroy(decoder);
+        }
+        else
+#endif
+        {
+#if HAVE_SAMPLERATE
+            SRC_STATE * src = node->data;
+            src_delete(src);
+#endif
+        }
+    }
+    jack_slist_free (netj->capture_srcs);
+    netj->playback_srcs = NULL;
+
     for (node = netj->playback_ports; node; node = jack_slist_next (node))
         jack_port_unregister (netj->client,
                               ((jack_port_t *) node->data));
 
     jack_slist_free (netj->playback_ports);
     netj->playback_ports = NULL;
+
+    for (node = netj->playback_srcs; node; node = jack_slist_next (node))
+    {
+#if HAVE_CELT
+        if( netj->bitdepth == CELT_MODE )
+        {
+            CELTEncoder * encoder = node->data;
+            celt_encoder_destroy(encoder);
+        }
+        else
+#endif
+        {
+#if HAVE_SAMPLERATE
+            SRC_STATE * src = node->data;
+            src_delete(src);
+#endif
+        }
+    }
+    jack_slist_free (netj->playback_srcs);
+    netj->playback_srcs = NULL;
+
+#if HAVE_CELT
+        if( netj->bitdepth == CELT_MODE )
+		celt_mode_destroy(netj->celt_mode);
+#endif
 }
 
 
@@ -564,6 +619,7 @@ netjack_driver_state_t *netjack_init (netjack_driver_state_t *netj,
     netj->resample_factor = resample_factor;
     netj->resample_factor_up = resample_factor_up;
 
+    netj->jitter_val = jitter_val;
 
     return netj;
 }
@@ -573,8 +629,8 @@ void netjack_release( netjack_driver_state_t *netj )
     close( netj->sockfd );
     close( netj->outsockfd );
 
-    packet_cache_free( global_packcache );
-    global_packcache = NULL;
+    packet_cache_free( netj->packcache );
+    netj->packcache = NULL;
 }
 
 int
@@ -712,7 +768,7 @@ netjack_startup( netjack_driver_state_t *netj )
     netj->period_usecs =
         (jack_time_t) floor ((((float) netj->period_size) / (float)netj->sample_rate)
                              * 1000000.0f);
-    
+
     if( netj->latency == 0 )
 	netj->deadline_offset = 50*netj->period_usecs;
     else
@@ -723,7 +779,7 @@ netjack_startup( netjack_driver_state_t *netj )
 	// TODO: this is a hack. But i dont want to change the packet header.
 	netj->resample_factor = (netj->resample_factor * netj->period_size * 1024 / netj->sample_rate / 8)&(~1);
 	netj->resample_factor_up = (netj->resample_factor_up * netj->period_size * 1024 / netj->sample_rate / 8)&(~1);
-	
+
 	netj->net_period_down = netj->resample_factor;
 	netj->net_period_up = netj->resample_factor_up;
     } else {
@@ -732,8 +788,7 @@ netjack_startup( netjack_driver_state_t *netj )
     }
 
     netj->rx_bufsize = sizeof (jacknet_packet_header) + netj->net_period_down * netj->capture_channels * get_sample_size (netj->bitdepth);
-    netj->pkt_buf = malloc (netj->rx_bufsize);
-    global_packcache = packet_cache_new (netj->latency + 50, netj->rx_bufsize, netj->mtu);
+    netj->packcache = packet_cache_new (netj->latency + 50, netj->rx_bufsize, netj->mtu);
 
     netj->expected_framecnt_valid = 0;
     netj->num_lost_packets = 0;

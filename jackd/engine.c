@@ -120,11 +120,12 @@ static void jack_engine_post_process (jack_engine_t *);
 static int  jack_use_driver (jack_engine_t *engine, jack_driver_t *driver);
 static int  jack_run_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 			    float delayed_usecs);
+static int   jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
+				 float delayed_usecs);
 static void jack_engine_delay (jack_engine_t *engine,
 			       float delayed_usecs);
 static void jack_engine_driver_exit (jack_engine_t* engine);
-static int  jack_start_freewheeling (jack_engine_t* engine);
-static int  jack_stop_freewheeling (jack_engine_t* engine);
+static int  jack_start_freewheeling (jack_engine_t* engine, jack_client_id_t);
 static int jack_client_feeds_transitive (jack_client_internal_t *source,
 					 jack_client_internal_t *dest);
 static int jack_client_sort (jack_client_internal_t *a,
@@ -133,6 +134,12 @@ static void jack_check_acyclic (jack_engine_t* engine);
 static void jack_compute_all_port_total_latencies (jack_engine_t *engine);
 static void jack_compute_port_total_latency (jack_engine_t *engine, jack_port_shared_t*);
 static void jack_engine_signal_problems (jack_engine_t* engine);
+static int jack_check_client_status (jack_engine_t* engine);
+static int jack_do_session_notify (jack_engine_t *engine, jack_request_t *req, int reply_fd );
+static void jack_do_get_client_by_uuid ( jack_engine_t *engine, jack_request_t *req);
+static void jack_do_reserve_name ( jack_engine_t *engine, jack_request_t *req);
+static void jack_do_session_reply (jack_engine_t *engine, jack_request_t *req );
+
 
 static inline int 
 jack_rolling_interval (jack_time_t period_usecs)
@@ -424,8 +431,8 @@ jack_engine_place_port_buffers (jack_engine_t* engine,
 	pthread_mutex_unlock (&pti->lock);
 }
 
-// JOQ: this should have a return code...
-static void
+
+static int
 jack_resize_port_segment (jack_engine_t *engine,
 			  jack_port_type_id_t ptid,
 			  unsigned long nports)
@@ -436,13 +443,8 @@ jack_resize_port_segment (jack_engine_t *engine,
 	jack_port_type_info_t* port_type = &engine->control->port_types[ptid];
 	jack_shm_info_t* shm_info = &engine->port_segment[ptid];
 
-	if (port_type->buffer_scale_factor < 0) {
-		one_buffer = port_type->buffer_size;
-	} else {
-		one_buffer = sizeof (jack_default_audio_sample_t)
-			* port_type->buffer_scale_factor
-			* engine->control->buffer_size;
-	}
+	one_buffer = jack_port_type_buffer_size (port_type, engine->control->buffer_size);
+	VERBOSE (engine, "resizing port buffer segment for type %d, one buffer = %u bytes", ptid, one_buffer);
 
 	size = nports * one_buffer;
 
@@ -453,13 +455,13 @@ jack_resize_port_segment (jack_engine_t *engine,
 				    " bytes (%s)", 
 				    size,
 				    strerror (errno));
-			return;
+			return -1;
 		}
 		
 		if (jack_attach_shm (shm_info)) {
 			jack_error ("cannot attach to new port segment "
 				    "(%s)", strerror (errno));
-			return;
+			return -1;
 		}
 
 		engine->control->port_types[ptid].shm_registry_index =
@@ -472,7 +474,7 @@ jack_resize_port_segment (jack_engine_t *engine,
 			jack_error ("cannot resize port segment to %d bytes,"
 				    " (%s)", size,
 				    strerror (errno));
-			return;
+			return -1;
 		}
 	}
 
@@ -502,6 +504,10 @@ jack_resize_port_segment (jack_engine_t *engine,
 	event.type = AttachPortSegment;
 	event.y.ptid = ptid;
 	jack_deliver_event_to_all (engine, &event);
+
+	/* XXX need to clean up in the evnt of failures */
+
+	return 0;
 }
 
 /* The driver invokes this callback both initially and whenever its
@@ -522,7 +528,9 @@ jack_driver_buffer_size (jack_engine_t *engine, jack_nframes_t nframes)
 			jack_rolling_interval (engine->driver->period_usecs);
 
 	for (i = 0; i < engine->control->n_port_types; ++i) {
-		jack_resize_port_segment (engine, i, engine->control->port_max);
+		if (jack_resize_port_segment (engine, i, engine->control->port_max)) {
+			return -1;
+		}
 	}
 
 	/* update shared client copy of nframes */
@@ -577,7 +585,7 @@ jack_process_internal(jack_engine_t *engine, JSList *node,
 	
 	/* internal client */
 
-	DEBUG ("invoking an internal client's callbacks");
+	DEBUG ("invoking an internal client's (%s) callbacks", ctl->name);
 	ctl->state = Running;
 	engine->current_client = client;
 
@@ -703,7 +711,7 @@ jack_process_external(jack_engine_t *engine, JSList *node)
 	then = jack_get_microseconds ();
 
 	if (engine->freewheeling) {
-		poll_timeout_usecs = 10000000; /* 10 seconds */
+		poll_timeout_usecs = 250000; /* 0.25 seconds */
 	} else {
 		poll_timeout_usecs = (engine->client_timeout_msecs > 0 ?
 				engine->client_timeout_msecs * 1000 :
@@ -741,6 +749,17 @@ jack_process_external(jack_engine_t *engine, JSList *node)
 		/* no events, no errors, we woke up because poll()
 		   decided that time was up ...
 		*/
+
+		if (engine->freewheeling) {
+			if (jack_check_client_status (engine)) {
+				return NULL;
+			} else {
+				/* all clients are fine - we're just not done yet. since
+				   we're freewheeling, that is fine.
+				*/
+				goto again;
+			}
+		}
 
 #ifdef __linux		
 		if (linux_poll_bug_encountered (engine, then, &poll_timeout_usecs)) {
@@ -842,7 +861,9 @@ jack_engine_process (jack_engine_t *engine, jack_nframes_t nframes)
 		DEBUG ("considering client %s for processing",
 		       client->control->name);
 
-		if (!client->control->active || client->control->dead) {
+		if (!client->control->active || 
+                    (!client->control->process_cbset && !client->control->thread_cb_cbset) || 
+                    client->control->dead) {
 			node = jack_slist_next (node);
 		} else if (jack_client_is_internal (client)) {
 			node = jack_process_internal (engine, node, nframes);
@@ -1297,11 +1318,11 @@ do_request (jack_engine_t *engine, jack_request_t *req, int *reply_fd)
 		break;
 
 	case FreeWheel:
-		req->status = jack_start_freewheeling (engine);
+		req->status = jack_start_freewheeling (engine, req->x.client_id);
 		break;
 
 	case StopFreeWheel:
-		req->status = jack_stop_freewheeling (engine);
+		req->status = jack_stop_freewheeling (engine, 0);
 		break;
 
 	case SetBufferSize:
@@ -1339,6 +1360,31 @@ do_request (jack_engine_t *engine, jack_request_t *req, int *reply_fd)
 		req->status = 0;
 		break;
 
+	case GetClientByUUID:
+		jack_rdlock_graph (engine);
+		jack_do_get_client_by_uuid (engine, req);
+		jack_unlock_graph (engine);
+		break;
+	case ReserveName:
+		jack_rdlock_graph (engine);
+		jack_do_reserve_name (engine, req);
+		jack_unlock_graph (engine);
+		break;
+	case SessionReply:
+		jack_rdlock_graph (engine);
+		jack_do_session_reply (engine, req);
+		jack_unlock_graph (engine);
+		break;
+	case SessionNotify:
+		jack_rdlock_graph (engine);
+		if ((req->status =
+	  	    jack_do_session_notify (engine, req, *reply_fd))
+		    >= 0) {
+			/* we have already replied, don't do it again */
+			*reply_fd = -1;
+		}
+		jack_unlock_graph (engine);
+		break;
 	default:
 		/* some requests are handled entirely on the client
 		 * side, by adjusting the shared memory area(s) */
@@ -1472,6 +1518,7 @@ jack_server_thread (void *arg)
 	int done = 0;
 	int i;
 	const int fixed_fd_cnt = 3;
+	int stop_freewheeling;
 
 	while (!done) {
 		JSList* node;
@@ -1582,12 +1629,17 @@ jack_server_thread (void *arg)
 		   and reset engine->problems
 		 */
 
+		stop_freewheeling = 0;
+
 		while (problemsProblemsPROBLEMS) {
 			
 			VERBOSE (engine, "trying to lock graph to remove %d problems", problemsProblemsPROBLEMS);
 			jack_lock_graph (engine);
 			VERBOSE (engine, "we have problem clients (problems = %d", problemsProblemsPROBLEMS);
-			jack_remove_clients (engine);
+			jack_remove_clients (engine, &stop_freewheeling);
+			if (stop_freewheeling) {
+				VERBOSE (engine, "need to stop freewheeling once problems are cleared");
+			}
 			jack_unlock_graph (engine);
 
 			jack_lock_problems (engine);
@@ -1598,6 +1650,9 @@ jack_server_thread (void *arg)
 			VERBOSE (engine, "after removing clients, problems = %d", problemsProblemsPROBLEMS);
 		}
 		
+		if (engine->freewheeling && stop_freewheeling) {
+			jack_stop_freewheeling (engine, 0);
+		}
 			
 		/* check the master server socket */
 
@@ -1618,7 +1673,7 @@ jack_server_thread (void *arg)
 				     &client_addrlen)) < 0) {
 				jack_error ("cannot accept new connection (%s)",
 					    strerror (errno));
-			} else if (jack_client_create (engine, client_socket) < 0) {
+			} else if (!engine->new_clients_allowed || jack_client_create (engine, client_socket) < 0) {
 				jack_error ("cannot complete client "
 					    "connection process");
 				close (client_socket);
@@ -1727,10 +1782,16 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	engine->server_name = server_name;
 	engine->temporary = temporary;
 	engine->freewheeling = 0;
+	engine->stop_freewheeling = 0;
+	engine->fwclient = 0;
 	engine->feedbackcount = 0;
 	engine->wait_pid = wait_pid;
 	engine->nozombies = nozombies;
 	engine->removing_clients = 0;
+        engine->new_clients_allowed = 1;
+
+	engine->session_reply_fd = -1;
+	engine->session_pending_replies = 0;
 
 	engine->audio_out_cnt = 0;
 	engine->audio_in_cnt = 0;
@@ -1750,6 +1811,7 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	pthread_mutex_init (&engine->problem_lock, 0);
 
 	engine->clients = 0;
+	engine->reserved_client_names = 0;
 
 	engine->pfd_size = 0;
 	engine->pfd_max = 0;
@@ -1990,6 +2052,7 @@ static void*
 jack_engine_freewheel (void *arg)
 {
 	jack_engine_t* engine = (jack_engine_t *) arg;
+	jack_client_internal_t* client;
 
 	VERBOSE (engine, "freewheel thread starting ...");
 
@@ -1997,20 +2060,19 @@ jack_engine_freewheel (void *arg)
 	   have to do anything about scheduling.
 	*/
 
-	while (engine->freewheeling) {
+	client = jack_client_internal_by_id (engine, engine->fwclient);
 
-		jack_lock_graph (engine);
+	while (!engine->stop_freewheeling) {
 
-		if (jack_engine_process (engine,
-					 engine->control->buffer_size)) {
-			jack_error ("process cycle within freewheel failed");
-			jack_unlock_graph (engine);
+		jack_run_one_cycle (engine, engine->control->buffer_size, 0.0f);
+
+		if (client && client->error) {
+			/* run one cycle() will already have told the server thread
+			   about issues, and the server thread will clean up.
+			   however, its time for us to depart this world ...
+			*/
 			break;
 		}
-
-		jack_engine_post_process (engine);
-
-		jack_unlock_graph (engine);
 	}
 
 	VERBOSE (engine, "freewheel came to an end, naturally");
@@ -2018,9 +2080,10 @@ jack_engine_freewheel (void *arg)
 }
 
 static int
-jack_start_freewheeling (jack_engine_t* engine)
+jack_start_freewheeling (jack_engine_t* engine, jack_client_id_t client_id)
 {
 	jack_event_t event;
+	jack_client_internal_t *client;
 
 	if (engine->freewheeling) {
 		return 0;
@@ -2040,7 +2103,14 @@ jack_start_freewheeling (jack_engine_t* engine)
 		return -1;
 	}
 
+	client = jack_client_internal_by_id (engine, client_id);
+
+	if (client->control->process_cbset || client->control->thread_cb_cbset) {
+		engine->fwclient = client_id;
+	}
+
 	engine->freewheeling = 1;
+	engine->stop_freewheeling = 0;
 
 	event.type = StartFreewheel;
 	jack_deliver_event_to_all (engine, &event);
@@ -2054,8 +2124,8 @@ jack_start_freewheeling (jack_engine_t* engine)
 	return 0;
 }
 
-static int
-jack_stop_freewheeling (jack_engine_t* engine)
+int
+jack_stop_freewheeling (jack_engine_t* engine, int engine_exiting)
 {
 	jack_event_t event;
 	void *ftstatus;
@@ -2078,23 +2148,70 @@ jack_stop_freewheeling (jack_engine_t* engine)
 	   to exit.
 	*/
 
-	engine->freewheeling = 0;
+	engine->stop_freewheeling = 1;
+
 	VERBOSE (engine, "freewheeling stopped, waiting for thread");
 	pthread_join (engine->freewheel_thread, &ftstatus);
 	VERBOSE (engine, "freewheel thread has returned");
 
-	/* tell everyone we've stopped */
+	engine->fwclient = 0;
+	engine->freewheeling = 0;
 
-	event.type = StopFreewheel;
-	jack_deliver_event_to_all (engine, &event);
-
-	/* restart the driver */
-
-	if (engine->driver->start (engine->driver)) {
-		jack_error ("could not restart driver after freewheeling");
-		return -1;
+	if (!engine_exiting) {
+		/* tell everyone we've stopped */
+		
+		event.type = StopFreewheel;
+		jack_deliver_event_to_all (engine, &event);
+		
+		/* restart the driver */
+		
+		if (engine->driver->start (engine->driver)) {
+			jack_error ("could not restart driver after freewheeling");
+			return -1;
+		}
 	}
+
 	return 0;
+}
+
+static int
+jack_check_client_status (jack_engine_t* engine)
+{
+	JSList *node;
+	int err = 0;
+
+	/* we are already late, or something else went wrong,
+	   so it can't hurt to check the existence of all
+	   clients.
+	*/
+	
+	for (node = engine->clients; node;
+	     node = jack_slist_next (node)) {
+		jack_client_internal_t *client =
+			(jack_client_internal_t *) node->data;
+		
+		if (client->control->type == ClientExternal) {
+			if (kill (client->control->pid, 0)) {
+				VERBOSE(engine,
+					"client %s has died/exited",
+					client->control->name);
+				client->error++;
+				err++;
+			}
+			if(client->control->last_status != 0) {
+				VERBOSE(engine,
+					"client %s has nonzero process callback status (%d)\n",
+					client->control->name, client->control->last_status);
+				client->error++;
+				err++;
+			}
+		}
+		
+		DEBUG ("client %s errors = %d", client->control->name,
+		       client->error);
+	}
+
+	return err;
 }
 
 static int
@@ -2107,7 +2224,8 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 
 #define WORK_SCALE 1.0f
 
-	if (engine->control->real_time &&
+	if (!engine->freewheeling && 
+	    engine->control->real_time &&
 	    engine->spare_usecs &&
 	    ((WORK_SCALE * engine->spare_usecs) <= delayed_usecs)) {
 
@@ -2129,17 +2247,27 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		consecutive_excessive_delays = 0;
 	}
 
-	DEBUG ("trying to acquire read lock");
+	DEBUG ("trying to acquire read lock (FW = %d)", engine->freewheeling);
 	if (jack_try_rdlock_graph (engine)) {
 		VERBOSE (engine, "lock-driven null cycle");
-		driver->null_cycle (driver, nframes);
+		if (!engine->freewheeling) {
+			driver->null_cycle (driver, nframes);
+		} else {
+			/* don't return too fast */
+			usleep (1000);
+		}
 		return 0;
 	}
 
 	if (jack_trylock_problems (engine)) {
 		VERBOSE (engine, "problem-lock-driven null cycle");
 		jack_unlock_graph (engine);
-		driver->null_cycle (driver, nframes);
+		if (!engine->freewheeling) {
+			driver->null_cycle (driver, nframes);
+		} else {
+			/* don't return too fast */
+			usleep (1000);
+		}
 		return 0;
 	}
 
@@ -2147,7 +2275,12 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		VERBOSE (engine, "problem-driven null cycle problems=%d", engine->problems);
 		jack_unlock_problems (engine);
 		jack_unlock_graph (engine);
-		driver->null_cycle (driver, nframes);
+		if (!engine->freewheeling) {
+			driver->null_cycle (driver, nframes);
+		} else {
+			/* don't return too fast */
+			usleep (1000);
+		}
 		return 0;
 	}
 
@@ -2170,38 +2303,9 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		}
 
 	} else {
-
-		JSList *node;
 		DEBUG ("engine process cycle failed");
-
-		/* we are already late, or something else went wrong,
-		   so it can't hurt to check the existence of all
-		   clients.
-		*/
-
-		for (node = engine->clients; node;
-		     node = jack_slist_next (node)) {
-			jack_client_internal_t *client =
-				(jack_client_internal_t *) node->data;
-
-			if (client->control->type == ClientExternal) {
-				if (kill (client->control->pid, 0)) {
-					VERBOSE(engine,
-						"client %s has died/exited",
-						client->control->name);
-					client->error++;
-				}
-				if(client->control->last_status != 0) {
-					VERBOSE(engine,
-						"client %s has nonzero process callback status (%d)\n",
-						client->control->name, client->control->last_status);
-					client->error++;
-				}
-			}
-			
-			DEBUG ("client %s errors = %d", client->control->name,
-			       client->error);
-		}
+		jack_check_client_status (engine);
+		
 	}
 
 	jack_engine_post_process (engine);
@@ -2315,6 +2419,8 @@ jack_engine_delete (jack_engine_t *engine)
 
 	VERBOSE (engine, "starting server engine shutdown");
 
+	jack_stop_freewheeling (engine, 1);
+
 	engine->control->engine_ok = 0;	/* tell clients we're going away */
 
 	/* this will wake the server thread and cause it to exit */
@@ -2427,6 +2533,222 @@ jack_deliver_event_to_all (jack_engine_t *engine, jack_event_t *event)
 	jack_unlock_graph (engine);
 }
 
+static jack_client_id_t jack_engine_get_max_uuid( jack_engine_t *engine )
+{
+	JSList *node;
+	jack_client_id_t retval = 0;
+	for (node = engine->clients; node; node = jack_slist_next (node)) {
+		jack_client_internal_t* client = (jack_client_internal_t*) node->data;
+		if( client->control->uid > retval )
+			retval = client->control->uid;
+	}
+	return retval;
+}
+
+static void jack_do_get_client_by_uuid ( jack_engine_t *engine, jack_request_t *req)
+{
+	JSList *node;
+	req->status = -1;
+	for (node = engine->clients; node; node = jack_slist_next (node)) {
+		jack_client_internal_t* client = (jack_client_internal_t*) node->data;
+		if( client->control->uid == req->x.client_id ) {
+			snprintf( req->x.port_info.name, sizeof(req->x.port_info.name), "%s", client->control->name );
+			req->status = 0;
+			return;
+		}
+	}
+}
+
+static void jack_do_reserve_name ( jack_engine_t *engine, jack_request_t *req)
+{
+	jack_reserved_name_t *reservation;
+	JSList *node;
+	// check is name is free...
+	for (node = engine->clients; node; node = jack_slist_next (node)) {
+		jack_client_internal_t* client = (jack_client_internal_t*) node->data;
+		if( !strcmp( (char *)client->control->name, req->x.reservename.name )) {
+			req->status = -1;
+			return;
+		}
+	}
+
+	reservation = malloc( sizeof( jack_reserved_name_t ) );
+	if( reservation == NULL ) {
+		req->status = -1;
+		return;
+	}
+
+	snprintf( reservation->name, sizeof( reservation->name ), "%s", req->x.reservename.name );
+	reservation->uuid = req->x.reservename.uuid;
+	engine->reserved_client_names = jack_slist_append( engine->reserved_client_names, reservation );
+
+	req->status = 0;
+}
+
+static int jack_send_session_reply ( jack_engine_t *engine, jack_client_internal_t *client )
+{
+	if (write (engine->session_reply_fd, (const void *) &client->control->uid, sizeof (client->control->uid))
+	    < (ssize_t) sizeof (client->control->uid)) {
+		jack_error ("cannot write SessionNotify result " 
+			    "to client via fd = %d (%s)", 
+			    engine->session_reply_fd, strerror (errno));
+		return -1;
+	}
+	if (write (engine->session_reply_fd, (const void *) client->control->name, sizeof (client->control->name))
+	    < (ssize_t) sizeof (client->control->name)) {
+		jack_error ("cannot write SessionNotify result "
+			    "to client via fd = %d (%s)", 
+			    engine->session_reply_fd, strerror (errno));
+		return -1;
+	}
+	if (write (engine->session_reply_fd, (const void *) client->control->session_command, 
+				sizeof (client->control->session_command))
+	    < (ssize_t) sizeof (client->control->session_command)) {
+		jack_error ("cannot write SessionNotify result "
+			    "to client via fd = %d (%s)", 
+			    engine->session_reply_fd, strerror (errno));
+		return -1;
+	}
+	if (write (engine->session_reply_fd, (const void *) ( & client->control->session_flags ), 
+				sizeof (client->control->session_flags))
+	    < (ssize_t) sizeof (client->control->session_flags)) {
+		jack_error ("cannot write SessionNotify result "
+			    "to client via fd = %d (%s)", 
+			    engine->session_reply_fd, strerror (errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int
+jack_do_session_notify (jack_engine_t *engine, jack_request_t *req, int reply_fd )
+{
+	JSList *node;
+	jack_event_t event;
+  
+	int reply;
+	jack_client_id_t finalizer=0;
+        struct stat sbuf;
+
+	if (engine->session_reply_fd != -1) {
+		// we should have a notion of busy or somthing.
+		// just sending empty reply now.
+		goto send_final;
+	}
+
+	engine->session_reply_fd = reply_fd;
+	engine->session_pending_replies = 0;
+
+	event.type = SaveSession;
+	event.y.n = req->x.session.type;
+ 	
+	/* GRAPH MUST BE LOCKED : see callers of jack_send_connection_notification() 
+	 */
+
+	// make sure all uuids are set.
+	for (node = engine->clients; node; node = jack_slist_next (node)) {
+		jack_client_internal_t* client = (jack_client_internal_t*) node->data;
+		if( client->control->uid == 0 ) {
+			client->control->uid=jack_engine_get_max_uuid( engine ) + 1;
+		}
+	}
+
+        if (stat (req->x.session.path, &sbuf) != 0 || !S_ISDIR (sbuf.st_mode)) {
+                jack_error ("session parent directory (%s) does not exist", req->x.session.path);
+                goto send_final;
+        }
+
+	for (node = engine->clients; node; node = jack_slist_next (node)) {
+		jack_client_internal_t* client = (jack_client_internal_t*) node->data;
+		if (client->control->session_cbset) {
+
+			// in case we only want to send to a special client.
+			// uuid assign is still complete. not sure if thats necessary.
+			if( (req->x.session.target[0] != 0) && strcmp(req->x.session.target, (char *)client->control->name) )
+				continue;
+
+                        /* the caller of jack_session_notify() is required to have created the session dir
+                         */
+                        
+                        if (req->x.session.path[strlen(req->x.session.path)-1] == '/') {
+                                snprintf (event.x.name, sizeof (event.x.name), "%s%s/", req->x.session.path, client->control->name );
+                        } else {
+                                snprintf (event.x.name, sizeof (event.x.name), "%s/%s/", req->x.session.path, client->control->name );
+                        }
+			if (mkdir (event.x.name, 0777) != 0) {
+                                jack_error ("cannot create session directory (%s) for client %s: %s",
+                                            event.x.name, client->control->name, strerror (errno));
+                                break;
+                        }
+			reply = jack_deliver_event (engine, client, &event);
+
+			if (reply == 1) {
+				// delayed reply
+				engine->session_pending_replies += 1;
+				client->session_reply_pending = TRUE;
+			} else if (reply == 2) {
+				// immediate reply
+				if (jack_send_session_reply (engine, client))
+					goto error_out;
+			}
+		} 
+	}
+
+	if (engine->session_pending_replies != 0)
+		return 0;
+
+send_final:
+	if (write (reply_fd, &finalizer, sizeof (finalizer))
+			< (ssize_t) sizeof (finalizer)) {
+		jack_error ("cannot write SessionNotify result "
+				"to client via fd = %d (%s)", 
+				reply_fd, strerror (errno));
+		goto error_out;
+	}
+
+	engine->session_reply_fd = -1;
+	return 0;
+error_out:
+	return -3;
+}
+
+static void jack_do_session_reply (jack_engine_t *engine, jack_request_t *req )
+{
+	jack_client_id_t client_id = req->x.client_id;
+	jack_client_internal_t *client = jack_client_internal_by_id (engine, client_id);
+	jack_client_id_t finalizer=0;
+
+	req->status = 0;
+
+	client->session_reply_pending = 0;
+
+	if (engine->session_reply_fd == -1) {
+		jack_error ("spurious Session Reply");
+		return;
+	}
+
+	engine->session_pending_replies -= 1;
+
+	if (jack_send_session_reply (engine, client)) {
+		// maybe need to fix all client pendings.
+		// but we will just get a set of spurious replies now.
+		engine->session_reply_fd = -1;
+		return;
+	}
+
+	if (engine->session_pending_replies == 0) {
+		if (write (engine->session_reply_fd, &finalizer, sizeof (finalizer))
+				< (ssize_t) sizeof (finalizer)) {
+			jack_error ("cannot write SessionNotify result "
+					"to client via fd = %d (%s)", 
+					engine->session_reply_fd, strerror (errno));
+			req->status = -1;
+		}
+		engine->session_reply_fd = -1;
+	}
+}
+
 static void
 jack_notify_all_port_interested_clients (jack_engine_t *engine, jack_client_id_t src, jack_client_id_t dst, jack_port_id_t a, jack_port_id_t b, int connected)
 {
@@ -2462,7 +2784,7 @@ static int
 jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 		    jack_event_t *event)
 {
-	char status;
+	char status=0;
 
 	/* caller must hold the graph lock */
 
@@ -2491,7 +2813,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 			break;
 
 		case BufferSizeChange:
-			jack_client_invalidate_port_buffers
+			jack_client_fix_port_buffers
 				(client->private_client);
 
 			if (client->control->bufsize_cbset) {
@@ -2547,7 +2869,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 			}
 
  			if (client->error) {
- 				status = 1;
+ 				status = -1;
  			} else {
  				// then we check whether there really is an error.... :)
  
@@ -2612,7 +2934,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 								    client->event_fd,
 								    pfd[0].revents,
 								    poll_timeout);
-							status = 1;
+							status = -2;
 #ifdef __linux
 						}
 #endif
@@ -2637,7 +2959,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 					    event->type);
   			}
 
-			if (status) {
+			if (status<0) {
 				client->error += JACK_ERROR_WITH_SOCKETS;
 				jack_engine_signal_problems (engine);
 			}
@@ -2645,7 +2967,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 	}
 	DEBUG ("event delivered");
 
-	return 0;
+	return status;
 }
 
 int
@@ -2668,22 +2990,24 @@ jack_rechain_graph (jack_engine_t *engine)
 
 	for (n = 0, node = engine->clients, next = NULL; node; node = next) {
 
+                jack_client_internal_t* client = (jack_client_internal_t *) node->data;
+
 		next = jack_slist_next (node);
+                
+		if (!client->control->process_cbset && !client->control->thread_cb_cbset) {
+			continue;
+		}
 
 		VERBOSE(engine, "+++ client is now %s active ? %d",
-			((jack_client_internal_t *) node->data)->control->name,
-			((jack_client_internal_t *) node->data)->control->active);
+			client->control->name, client->control->active);
 
-		if (((jack_client_internal_t *) node->data)->control->active) {
-
-			client = (jack_client_internal_t *) node->data;
+		if (client->control->active) {
 
 			/* find the next active client. its ok for
 			 * this to be NULL */
 			
 			while (next) {
-				if (((jack_client_internal_t *)
-				     next->data)->control->active) {
+				if (client->control->active && (client->control->process_cbset || client->control->thread_cb_cbset)) {
 					break;
 				}
 				next = jack_slist_next (next);
@@ -2938,20 +3262,22 @@ jack_compute_all_port_total_latencies (jack_engine_t *engine)
 	jack_port_shared_t *shared = engine->control->ports;
 	unsigned int i;
  	int toward_port;
- 
+
 	for (i = 0; i < engine->control->port_max; i++) {
 		if (shared[i].in_use) {
-			if (shared[i].flags & JackPortIsOutput) {
-				toward_port = FALSE;
-			} else {
-				toward_port = TRUE;
-			}
-			shared[i].total_latency =
-				jack_get_port_total_latency (
-					engine, &engine->internal_ports[i],
-					0, toward_port);
-		}
-	}
+
+ 			if (shared[i].flags & JackPortIsOutput) {
+ 				toward_port = FALSE;
+ 			} else {
+ 				toward_port = TRUE;
+ 			}
+
+ 			shared[i].total_latency =
+ 				jack_get_port_total_latency (
+ 					engine, &engine->internal_ports[i],
+ 					0, toward_port);
+ 		}
+ 	}
 }
 
 /* How the sort works:
@@ -3166,12 +3492,13 @@ void jack_dump_configuration(jack_engine_t *engine, int take_lock)
 	        client = (jack_client_internal_t *) clientnode->data;
 		ctl = client->control;
 
-		jack_info ("client #%d: %s (type: %d, process? %s,"
+		jack_info ("client #%d: %s (type: %d, process? %s, thread ? %s"
 			 " start=%d wait=%d",
 			 ++n,
 			 ctl->name,
 			 ctl->type,
 			 ctl->process_cbset ? "yes" : "no",
+			 ctl->thread_cb_cbset ? "yes" : "no",
 			 client->subgraph_start_fd,
 			 client->subgraph_wait_fd);
 
@@ -3793,14 +4120,19 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 
 	shared = &engine->control->ports[port_id];
 
-	if (!internal || !engine->driver)
+	if (!internal || !engine->driver) {
 		goto fallback;
+        }
+
+        /* if the port belongs to the backend client, do some magic with names 
+         */
 
 	backend_client_name = (char *) engine->driver->internal_client->control->name;
 	len = strlen (backend_client_name);
 
-	if (strncmp (req->x.port_info.name, backend_client_name, len) != 0)
+	if (strncmp (req->x.port_info.name, backend_client_name, len) != 0) {
 		goto fallback;
+        }
 
 	/* use backend's original as an alias, use predefined names */
 
@@ -3857,7 +4189,8 @@ next:
 	}
 
 	client->ports = jack_slist_prepend (client->ports, port);
-	jack_port_registration_notify (engine, port_id, TRUE);
+	if( client->control->active )
+		jack_port_registration_notify (engine, port_id, TRUE);
 	jack_unlock_graph (engine);
 
 	VERBOSE (engine, "registered port %s, offset = %u",

@@ -206,7 +206,7 @@ net_driver_read (net_driver_t* driver, jack_nframes_t nframes)
     }
 
     render_payload_to_jack_ports (netj->bitdepth, packet_bufX, netj->net_period_down, netj->capture_ports, netj->capture_srcs, nframes, netj->dont_htonl_floats );
-    packet_cache_release_packet(global_packcache, netj->expected_framecnt );
+    packet_cache_release_packet(netj->packcache, netj->expected_framecnt );
 
     return 0;
 }
@@ -268,7 +268,10 @@ static int
 net_driver_attach (net_driver_t *driver)
 {
     netjack_driver_state_t *netj = &( driver->netj );
-    driver->engine->set_buffer_size (driver->engine, netj->period_size);
+    if (driver->engine->set_buffer_size (driver->engine, netj->period_size)) {
+	    jack_error ("netjack: cannot set engine buffer size to %d (check MIDI)", netj->period_size);
+	    return -1;
+    }
     driver->engine->set_sample_rate (driver->engine, netj->sample_rate);
 
     netjack_attach( netj );
