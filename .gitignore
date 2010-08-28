@@ -45,6 +45,7 @@ example-clients/jack_midisine
 example-clients/jack_showtime
 example-clients/jack_simple_client
 example-clients/jack_transport_client
+example-clients/jackrec
 jack/version.h
 jackd/jack_md5.h
 jackd/jackd
