@@ -61,6 +61,13 @@
 #include <sysdeps/pThreadUtilities.h>
 #endif
 
+/* There is no point in attempting to start JACK server from libjackserver. */
+#if HAVE_DBUS
+#if defined(LIBJACKSERVER)
+#undef HAVE_DBUS
+#endif
+#endif
+
 #if HAVE_DBUS
 #include <dbus/dbus.h>
 #endif

@@ -32,7 +32,7 @@ COMMON_SOURCES = engine.c clientengine.c transengine.c
 COMMON_LIBS = libjackserver.la $(CAP_LIBS) @OS_LDFLAGS@
 
 jackd_SOURCES = jackd.c $(COMMON_SOURCES)
-jackd_LDADD = $(COMMON_LIBS) $(DBUS_LIBS)
+jackd_LDADD = $(COMMON_LIBS)
 
 noinst_HEADERS = jack_md5.h md5.h md5_loc.h \
 		 clientengine.h transengine.h
@@ -50,7 +50,7 @@ jackstart_LDFLAGS = -lcap
 
 lib_LTLIBRARIES	= libjackserver.la
 
-libjackserver_la_CFLAGS = $(AM_CFLAGS)
+libjackserver_la_CFLAGS = $(AM_CFLAGS) -DLIBJACKSERVER
 
 libjackserver_la_SOURCES = engine.c clientengine.c transengine.c \
 	../libjack/systemtest.c ../libjack/sanitycheck.c \
