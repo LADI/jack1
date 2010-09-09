@@ -107,12 +107,6 @@ jack_controller_start_server(
 {
 	jack_info("Starting jack server...");
 
-	if (controller_ptr->started)
-	{
-		jack_info("Already started.");
-		return TRUE;
-	}
-
 	if (controller_ptr->driver == NULL)
 	{
 		jack_dbus_error(dbus_call_context_ptr, JACK_DBUS_ERROR_GENERIC, "Select driver first!");
@@ -144,12 +138,6 @@ jack_controller_stop_server(
 	void *dbus_call_context_ptr)
 {
 	jack_info("Stopping jack server...");
-
-	if (!controller_ptr->started)
-	{
-		jack_info("Already stopped.");
-		return TRUE;
-	}
 
 	if (!jackctl_server_stop(controller_ptr->server))
 	{

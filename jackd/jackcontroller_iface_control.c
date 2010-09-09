@@ -31,6 +31,8 @@
 #include "jackdbus.h"
 #include "jackcontroller_internal.h"
 
+#define JACK_DBUS_IFACE_NAME "org.jackaudio.JackControl"
+
 #define controller_ptr ((struct jack_controller *)call->context)
 
 /*
@@ -60,16 +62,46 @@ jack_control_run_method(
 	}
 	else if (strcmp (call->method_name, "StartServer") == 0)
 	{
-		if (!jack_controller_start_server(controller_ptr, call))
+		if (controller_ptr->started)
 		{
-			jack_error ("Failed to start server");
+			jack_info("Already started.");
+		}
+		else
+		{
+			if (!jack_controller_start_server(controller_ptr, call))
+			{
+				jack_error ("Failed to start server");
+			}
+			else
+			{
+				jack_dbus_send_signal(
+					JACK_CONTROLLER_OBJECT_PATH,
+					JACK_DBUS_IFACE_NAME,
+					"ServerStarted",
+					DBUS_TYPE_INVALID);
+			}
 		}
 	}
 	else if (strcmp (call->method_name, "StopServer") == 0)
 	{
-		if (!jack_controller_stop_server(controller_ptr, call))
+		if (!controller_ptr->started)
 		{
-			jack_error ("Failed to stop server");
+			jack_info("Already stopped.");
+		}
+		else
+		{
+			if (!jack_controller_stop_server(controller_ptr, call))
+			{
+				jack_error ("Failed to stop server");
+			}
+			else
+			{
+				jack_dbus_send_signal(
+					JACK_CONTROLLER_OBJECT_PATH,
+					JACK_DBUS_IFACE_NAME,
+					"ServerStopped",
+					DBUS_TYPE_INVALID);
+			}
 		}
 	}
 	else if (strcmp (call->method_name, "GetLoad") == 0)
@@ -228,9 +260,24 @@ const struct jack_dbus_interface_method_descriptor g_jack_controller_control_ifa
 	JACK_DBUS_METHOD_DESCRIBE_END
 };
 
+JACK_DBUS_SIGNAL_ARGUMENTS_BEGIN(ServerStarted)
+JACK_DBUS_SIGNAL_ARGUMENTS_END
+
+JACK_DBUS_SIGNAL_ARGUMENTS_BEGIN(ServerStopped)
+JACK_DBUS_SIGNAL_ARGUMENTS_END
+
+static
+const struct jack_dbus_interface_signal_descriptor g_jack_controller_control_iface_signals[] =
+{
+	JACK_DBUS_SIGNAL_DESCRIBE(ServerStarted)
+	JACK_DBUS_SIGNAL_DESCRIBE(ServerStopped)
+	JACK_DBUS_SIGNAL_DESCRIBE_END
+};
+
 struct jack_dbus_interface_descriptor g_jack_controller_iface_control =
 {
-	"org.jackaudio.JackControl",
-	jack_control_run_method,
-	g_jack_controller_control_iface_methods
+	.name = JACK_DBUS_IFACE_NAME,
+	.handler = jack_control_run_method,
+	.methods = g_jack_controller_control_iface_methods,
+	.signals = g_jack_controller_control_iface_signals
 };
