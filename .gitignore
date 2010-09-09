@@ -72,3 +72,6 @@ man/jack_wait.1
 tools/jack_bufsize
 tools/jack_samplerate
 tools/jack_wait
+example-clients/jack_simple_session_client
+tools/jack_midi_dump
+tools/jack_session_notify
