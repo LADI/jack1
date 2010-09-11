@@ -924,7 +924,7 @@ fail:
 
 static
 struct jackctl_port *
-jackctl_find_port(
+jackctl_find_client_port_by_name(
 	struct jackctl_client * client_ptr,
 	const char * port_name)	/* '\0' terminated */
 {
@@ -1427,7 +1427,7 @@ jackctl_connection_notify(
 		return;
 	}
 
-	port1_ptr = jackctl_find_port(client1_ptr, port1_short_name);
+	port1_ptr = jackctl_find_client_port_by_name(client1_ptr, port1_short_name);
 	if (port1_ptr == NULL)
 	{
 		jack_error("Unknown port '%s'.", port1_full_name);
@@ -1441,7 +1441,7 @@ jackctl_connection_notify(
 		return;
 	}
 
-	port2_ptr = jackctl_find_port(client2_ptr, port2_short_name);
+	port2_ptr = jackctl_find_client_port_by_name(client2_ptr, port2_short_name);
 	if (port2_ptr == NULL)
 	{
 		jack_error("Unknown port '%s'.", port2_full_name);
