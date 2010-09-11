@@ -949,6 +949,78 @@ jackctl_find_client_port_by_name(
 
 static
 bool
+jackctl_compose_port_fullname(
+	struct jackctl_client * client_ptr,
+	struct jackctl_port * port_ptr,
+	char * port_fullname_buffer)
+{
+	if (strlen(client_ptr->name) + strlen(port_ptr->name) + 2 > JACK_CLIENT_NAME_SIZE + JACK_PORT_NAME_SIZE)
+	{
+		jack_error("client name + port name too long");
+		return false;
+	}
+
+	sprintf(port_fullname_buffer, "%s:%s", client_ptr->name, port_ptr->name);
+	return true;
+}
+
+static
+bool
+jackctl_find_client_ports_by_id(
+	struct jackctl_server * server_ptr,
+	uint64_t port1_id,
+	uint64_t port2_id,
+	char * port1_fullname_buffer,
+	char * port2_fullname_buffer)
+{
+	int found;
+	JSList * client_node_ptr;
+	JSList * port_node_ptr;
+	struct jackctl_client * client_ptr;
+	struct jackctl_port * port_ptr;
+
+	found = 0;
+
+	for (client_node_ptr = server_ptr->clients; client_node_ptr != NULL; client_node_ptr = jack_slist_next(client_node_ptr))
+	{
+		client_ptr = client_node_ptr->data;
+
+		for (port_node_ptr = client_ptr->ports; port_node_ptr != NULL; port_node_ptr = jack_slist_next(port_node_ptr))
+		{
+			port_ptr = port_node_ptr->data;
+
+			if (port_ptr->id == port1_id)
+			{
+				if (!jackctl_compose_port_fullname(client_ptr, port_ptr, port1_fullname_buffer))
+				{
+					return false;
+				}
+
+				found++;
+			}
+
+			if (port_ptr->id == port2_id)
+			{
+				if (!jackctl_compose_port_fullname(client_ptr, port_ptr, port2_fullname_buffer))
+				{
+					return false;
+				}
+
+				found++;
+			}
+
+			if (found == 2)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+static
+bool
 jackctl_remove_port(
 	struct jackctl_server * server_ptr,
 	struct jackctl_client * client_ptr,
@@ -1105,9 +1177,29 @@ jackctl_connect_ports_by_id(
 	uint64_t port1_id,
 	uint64_t port2_id)
 {
-	jack_info("Connecting %"PRIu64" to %"PRIu64, port1_id, port2_id);
-	jack_error("jackctl_connect_ports_by_id() not implemetned yet");
-	return false;
+	int ret;
+	char port1_full_name[JACK_CLIENT_NAME_SIZE + JACK_PORT_NAME_SIZE];
+	char port2_full_name[JACK_CLIENT_NAME_SIZE + JACK_PORT_NAME_SIZE];
+
+	if (!jackctl_find_client_ports_by_id(server_ptr, port1_id, port2_id, port1_full_name, port2_full_name))
+	{
+		jack_error("jackctl_find_client_ports_by_id(%"PRIu64", %"PRIu64") failed", port1_id, port2_id);
+		return false;
+	}
+
+	jack_info("Connecting %"PRIu64" (%s) to %"PRIu64" (%s)", port1_id, port1_full_name, port2_id, port2_full_name);
+
+	ret = jack_port_do_connect(
+		server_ptr->engine,
+		port1_full_name,
+		port2_full_name);
+	if (ret != 0)
+	{
+		jack_error("jack_port_do_connect('%s', '%s') failed with %d", port1_full_name, port2_full_name, ret);
+		return false;
+	}
+
+	return true;
 }
 
 bool
@@ -1116,9 +1208,29 @@ jackctl_disconnect_ports_by_id(
 	uint64_t port1_id,
 	uint64_t port2_id)
 {
-	jack_info("Disconnecting %"PRIu64" from %"PRIu64, port1_id, port2_id);
-	jack_error("jackctl_disconnect_ports_by_id() not implemetned yet");
-	return false;
+	int ret;
+	char port1_full_name[JACK_CLIENT_NAME_SIZE + JACK_PORT_NAME_SIZE];
+	char port2_full_name[JACK_CLIENT_NAME_SIZE + JACK_PORT_NAME_SIZE];
+
+	if (!jackctl_find_client_ports_by_id(server_ptr, port1_id, port2_id, port1_full_name, port2_full_name))
+	{
+		jack_error("jackctl_find_client_ports_by_id(%"PRIu64", %"PRIu64") failed", port1_id, port2_id);
+		return false;
+	}
+
+	jack_info("Disonnecting %"PRIu64" (%s) from %"PRIu64" (%s)", port1_id, port1_full_name, port2_id, port2_full_name);
+
+	ret = jack_port_do_disconnect(
+		server_ptr->engine,
+		port1_full_name,
+		port2_full_name);
+	if (ret != 0)
+	{
+		jack_error("jack_port_do_disconnect('%s', '%s') failed with %d", port1_full_name, port2_full_name, ret);
+		return false;
+	}
+
+	return true;
 }
 
 bool
