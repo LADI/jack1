@@ -980,12 +980,47 @@ void
 jack_controller_dbus_connect_ports_by_id(
 	struct jack_dbus_method_call * call)
 {
+	dbus_uint64_t port1;
+	dbus_uint64_t port2;
+
 	jack_info("jack_controller_dbus_connect_ports_by_id() called.");
 
-	jack_dbus_error(
-		call,
-		JACK_DBUS_ERROR_GENERIC,
-		"This method is not implemented yet");
+	if (!controller_ptr->started)
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_SERVER_NOT_RUNNING,
+			"Can't execute this method with stopped JACK server");
+		return;
+	}
+
+	if (!jack_dbus_get_method_args(
+		    call,
+		    DBUS_TYPE_UINT64,
+		    &port1,
+		    DBUS_TYPE_UINT64,
+		    &port2,
+		    DBUS_TYPE_INVALID))
+	{
+		/* The method call had invalid arguments meaning that
+		 * jack_dbus_get_method_args() has constructed an error for us.
+		 */
+		return;
+	}
+
+	if (!jackctl_connect_ports_by_id(
+		    controller_ptr->server,
+		    port1,
+		    port2))
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_GENERIC,
+			"jackctl_connect_ports_by_id() failed.");
+		return;
+	}
+
+	jack_dbus_construct_method_return_empty(call);
 }
 
 static
@@ -1051,12 +1086,47 @@ void
 jack_controller_dbus_disconnect_ports_by_id(
 	struct jack_dbus_method_call * call)
 {
+	dbus_uint64_t port1;
+	dbus_uint64_t port2;
+
 	jack_info("jack_controller_dbus_disconnect_ports_by_id() called.");
 
-	jack_dbus_error(
-		call,
-		JACK_DBUS_ERROR_GENERIC,
-		"This method is not implemented yet");
+	if (!controller_ptr->started)
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_SERVER_NOT_RUNNING,
+			"Can't execute this method with stopped JACK server");
+		return;
+	}
+
+	if (!jack_dbus_get_method_args(
+		    call,
+		    DBUS_TYPE_UINT64,
+		    &port1,
+		    DBUS_TYPE_UINT64,
+		    &port2,
+		    DBUS_TYPE_INVALID))
+	{
+		/* The method call had invalid arguments meaning that
+		 * jack_dbus_get_method_args() has constructed an error for us.
+		 */
+		return;
+	}
+
+	if (!jackctl_disconnect_ports_by_id(
+		    controller_ptr->server,
+		    port1,
+		    port2))
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_GENERIC,
+			"jackctl_disconnect_ports_by_id() failed.");
+		return;
+	}
+
+	jack_dbus_construct_method_return_empty(call);
 }
 
 static
@@ -1064,12 +1134,43 @@ void
 jack_controller_dbus_disconnect_ports_by_connection_id(
 	struct jack_dbus_method_call * call)
 {
-	jack_info("jack_controller_dbus_disconnect_ports_by_id() called.");
+	dbus_uint64_t id;
 
-	jack_dbus_error(
-		call,
-		JACK_DBUS_ERROR_GENERIC,
-		"This method is not implemented yet");
+	jack_info("jack_controller_dbus_disconnect_ports_by_connection_id() called.");
+
+	if (!controller_ptr->started)
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_SERVER_NOT_RUNNING,
+			"Can't execute this method with stopped JACK server");
+		return;
+	}
+
+	if (!jack_dbus_get_method_args(
+		    call,
+		    DBUS_TYPE_UINT64,
+		    &id,
+		    DBUS_TYPE_INVALID))
+	{
+		/* The method call had invalid arguments meaning that
+		 * jack_dbus_get_method_args() has constructed an error for us.
+		 */
+		return;
+	}
+
+	if (!jackctl_disconnect_ports_by_connection_id(
+		    controller_ptr->server,
+		    id))
+	{
+		jack_dbus_error(
+			call,
+			JACK_DBUS_ERROR_GENERIC,
+			"jackctl_disconnect_ports_by_connection_id() failed.");
+		return;
+	}
+
+	jack_dbus_construct_method_return_empty(call);
 }
 
 static
