@@ -2,7 +2,7 @@
 /*
     JACK control API
 
-    Copyright (C) 2008 Nedko Arnaudov
+    Copyright (C) 2008,2010 Nedko Arnaudov
     Copyright (C) 2008 GRAME
     
     This program is free software; you can redistribute it and/or modify

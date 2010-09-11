@@ -1,6 +1,6 @@
 /* -*- mode: c; c-file-style: "bsd"; -*- */
 /*
-    Copyright (C) 2008 Nedko Arnaudov
+    Copyright (C) 2008,2010 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
