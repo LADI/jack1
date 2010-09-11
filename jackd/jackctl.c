@@ -1099,6 +1099,38 @@ jackctl_disconnect_ports_by_name(
 	return true;
 }
 
+bool
+jackctl_connect_ports_by_id(
+	jackctl_server server,
+	uint64_t port1_id,
+	uint64_t port2_id)
+{
+	jack_info("Connecting %"PRIu64" to %"PRIu64, port1_id, port2_id);
+	jack_error("jackctl_connect_ports_by_id() not implemetned yet");
+	return false;
+}
+
+bool
+jackctl_disconnect_ports_by_id(
+	jackctl_server server,
+	uint64_t port1_id,
+	uint64_t port2_id)
+{
+	jack_info("Disconnecting %"PRIu64" from %"PRIu64, port1_id, port2_id);
+	jack_error("jackctl_disconnect_ports_by_id() not implemetned yet");
+	return false;
+}
+
+bool
+jackctl_disconnect_ports_by_connection_id(
+	jackctl_server server,
+	uint64_t connection_id)
+{
+	jack_info("Disconnecting connection %"PRIu64, connection_id);
+	jack_error("jackctl_disconnect_ports_by_connection_id() not implemetned yet");
+	return false;
+}
+
 void jackctl_server_destroy(jackctl_server server)
 {
 	jackctl_server_free_drivers(server_ptr);

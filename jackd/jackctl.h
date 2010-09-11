@@ -560,8 +560,8 @@ jackctl_connect_ports_by_name(
 bool
 jackctl_connect_ports_by_id(
 	jackctl_server server,
-	const char * port1_id,
-	const char * port2_id);
+	uint64_t port1_id,
+	uint64_t port2_id);
 
 bool
 jackctl_disconnect_ports_by_name(
@@ -574,13 +574,13 @@ jackctl_disconnect_ports_by_name(
 bool
 jackctl_disconnect_ports_by_id(
 	jackctl_server server,
-	const char * port1_id,
-	const char * port2_id);
+	uint64_t port1_id,
+	uint64_t port2_id);
 
 bool
 jackctl_disconnect_ports_by_connection_id(
 	jackctl_server server,
-	const char * connection_id);
+	uint64_t connection_id);
 
 #if 0
 { /* Adjust editor indent */
