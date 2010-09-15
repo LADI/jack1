@@ -848,7 +848,7 @@ jackctl_find_client(
 	while (node_ptr != NULL)
 	{
 		client_ptr = node_ptr->data;
-		if (strncmp(client_ptr->name, client_name, client_name_len) == 0)
+		if (strlen(client_ptr->name) == client_name_len && strncmp(client_ptr->name, client_name, client_name_len) == 0)
 		{
 			return client_ptr;
 		}
