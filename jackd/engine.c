@@ -106,8 +106,6 @@ static int  jack_send_connection_notification (jack_engine_t *,
 					       jack_client_id_t,
 					       jack_port_id_t,
 					       jack_port_id_t, int);
-static int  jack_deliver_event (jack_engine_t *, jack_client_internal_t *,
-				jack_event_t *);
 static void jack_deliver_event_to_all (jack_engine_t *engine,
 				       jack_event_t *event);
 static void jack_notify_all_port_interested_clients (jack_engine_t *engine,
@@ -133,7 +131,6 @@ static int jack_client_sort (jack_client_internal_t *a,
 static void jack_check_acyclic (jack_engine_t* engine);
 static void jack_compute_all_port_total_latencies (jack_engine_t *engine);
 static void jack_compute_port_total_latency (jack_engine_t *engine, jack_port_shared_t*);
-static void jack_engine_signal_problems (jack_engine_t* engine);
 static int jack_check_client_status (jack_engine_t* engine);
 static int jack_do_session_notify (jack_engine_t *engine, jack_request_t *req, int reply_fd );
 static void jack_do_get_client_by_uuid ( jack_engine_t *engine, jack_request_t *req);
@@ -2780,7 +2777,7 @@ jack_notify_all_port_interested_clients (jack_engine_t *engine, jack_client_id_t
 	}
 }
 
-static int
+int
 jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 		    jack_event_t *event)
 {
@@ -2976,7 +2973,7 @@ jack_rechain_graph (jack_engine_t *engine)
 	JSList *node, *next;
 	unsigned long n;
 	int err = 0;
-	jack_client_internal_t *client, *subgraph_client, *next_client;
+	jack_client_internal_t *subgraph_client, *next_client;
 	jack_event_t event;
 	int upstream_is_jackd;
 
@@ -4498,10 +4495,20 @@ jack_send_connection_notification (jack_engine_t *engine,
 	return 0;
 }
 
+static void
+jack_wake_server_thread (jack_engine_t* engine)
+{
+	char c = 0;
+	/* we don't actually care if this fails */
+	VERBOSE (engine, "waking server thread");
+	write (engine->cleanup_fifo[1], &c, 1);
+}
+
 void
 jack_engine_signal_problems (jack_engine_t* engine)
 {
 	jack_lock_problems (engine);
 	engine->problems++;
 	jack_unlock_problems (engine);
+	jack_wake_server_thread (engine);
 }

@@ -61,8 +61,8 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=119
-JACK_MICRO_VERSION=0
+JACK_MINOR_VERSION=120
+JACK_MICRO_VERSION=1
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
@@ -550,6 +550,14 @@ if test x$buffer_resizing != xno; then
    AC_DEFINE(DO_BUFFER_RESIZE,,[Enable buffer resizing])
 fi
 
+AC_ARG_ENABLE(valgrind-clean,
+	AC_HELP_STRING([--enable-valgrind-clean],[spend a few extra CPU cycles avoiding unnecessary valgrind warnings (default=no)]),
+        [ 
+	  if test x$enable_valgrind_clean != xno ; then
+	     AC_DEFINE(VALGRIND_CLEAN,,[clean up for valgrind])
+          fi
+        ]
+)
 
 AC_ARG_ENABLE(ensure-mlock,
 	AC_HELP_STRING([--enable-ensure-mlock], [server should fail if unable to lock memory (default=no)]),
@@ -708,26 +716,38 @@ fi
 
 # Celt low-latency audio codec. netjack transmission via internet.
 HAVE_CELT=false
-PKG_CHECK_MODULES(CELT, celt >= 0.7.0,[HAVE_CELT=true], [true])
+PKG_CHECK_MODULES(CELT, celt >= 0.8.0,[HAVE_CELT=true], [true])
 if test x$HAVE_CELT = xfalse; then
-	PKG_CHECK_MODULES(CELT, celt >= 0.5.0,[HAVE_CELT=true], [true])
+	PKG_CHECK_MODULES(CELT, celt >= 0.7.0,[HAVE_CELT=true], [true])
 	if test x$HAVE_CELT = xfalse; then
-		AC_DEFINE(HAVE_CELT,0,"Whether CELT is available")
-		AC_MSG_RESULT(no)
-		AC_MSG_WARN([*** NetJack will not be built with celt support])
+		PKG_CHECK_MODULES(CELT, celt >= 0.5.0,[HAVE_CELT=true], [true])
+		if test x$HAVE_CELT = xfalse; then
+			AC_DEFINE(HAVE_CELT,0,"Whether CELT is available")
+			AC_MSG_RESULT(no)
+			AC_MSG_WARN([*** NetJack will not be built with celt support])
+		else
+			AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
+			AC_DEFINE(HAVE_CELT_API_0_5,1,"Whether CELT API is 0.5 API")
+			AC_DEFINE(HAVE_CELT_API_0_7,0,"Whether CELT API is 0.7 API")
+			AC_DEFINE(HAVE_CELT_API_0_8,0,"Whether CELT API is 0.8 API")
+			AC_MSG_RESULT(yes (0.5))
+			NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
+		fi
 	else
 		AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
-		AC_DEFINE(HAVE_CELT_API_0_5,1,"Whether CELT API is 0.5 API")
-		AC_DEFINE(HAVE_CELT_API_0_7,0,"Whether CELT API is 0.7 API")
-		AC_MSG_RESULT(yes (0.5))
+		AC_MSG_RESULT(yes (0.7))
+		AC_DEFINE(HAVE_CELT_API_0_5,0,"Whether CELT API is 0.5 API")
+		AC_DEFINE(HAVE_CELT_API_0_7,1,"Whether CELT API is 0.7 API")
+		AC_DEFINE(HAVE_CELT_API_0_8,0,"Whether CELT API is 0.8 API")
 		NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
 	fi
 else
-    	AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
-	AC_MSG_RESULT(yes (0.7))
-	AC_DEFINE(HAVE_CELT_API_0_5,0,"Whether CELT API is 0.5 API")
-	AC_DEFINE(HAVE_CELT_API_0_7,1,"Whether CELT API is 0.7 API")
-	NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
+		AC_DEFINE(HAVE_CELT,1,"Whether CELT is available")
+		AC_MSG_RESULT(yes (0.7))
+		AC_DEFINE(HAVE_CELT_API_0_5,0,"Whether CELT API is 0.5 API")
+		AC_DEFINE(HAVE_CELT_API_0_7,0,"Whether CELT API is 0.7 API")
+		AC_DEFINE(HAVE_CELT_API_0_8,1,"Whether CELT API is 0.8 API")
+		NETJACK_LIBS="$NETJACK_LIBS $CELT_LIBS"
 fi
 
 AC_SUBST(NETJACK_LIBS)

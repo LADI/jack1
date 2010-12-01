@@ -127,6 +127,7 @@ dummy_driver_wait (dummy_driver_t *driver, int extra_fd, int *status,
 			jack_error("**** dummy: xrun of %ju usec",
 				(uintmax_t)(ts_to_nsec(now) - ts_to_nsec(driver->next_wakeup))/1000LL);
 			nframes = 0;
+			driver->next_wakeup.tv_sec = 0;
 		} else {
 			/* late, but handled by our "buffer"; try to
 			 * get back on track */
@@ -150,6 +151,12 @@ dummy_driver_wait (dummy_driver_t *driver, int extra_fd, int *status,
 					       driver->last_wait_ust);
 
 	return nframes;
+}
+
+static int dummy_driver_nt_start (dummy_driver_t *drv) 
+{
+	drv->next_wakeup.tv_sec = 0;
+	return 0; 
 }
 
 #else
@@ -192,6 +199,12 @@ dummy_driver_wait (dummy_driver_t *driver, int extra_fd, int *status,
 	*delayed_usecs = 0;		/* lie about it */
 	*status = 0;
 	return driver->period_size;
+}
+
+static int dummy_driver_nt_start (dummy_driver_t *drv) 
+{
+	drv->next_time = 0;
+	return 0; 
 }
 #endif
 
@@ -366,6 +379,7 @@ dummy_driver_new (jack_client_t * client,
 	driver->write         = (JackDriverReadFunction)       dummy_driver_write;
 	driver->null_cycle    = (JackDriverNullCycleFunction)  dummy_driver_null_cycle;
 	driver->nt_attach     = (JackDriverNTAttachFunction)   dummy_driver_attach;
+	driver->nt_start      = (JackDriverNTStartFunction)    dummy_driver_nt_start;
 	driver->nt_detach     = (JackDriverNTDetachFunction)   dummy_driver_detach;
 	driver->nt_bufsize    = (JackDriverNTBufSizeFunction)  dummy_driver_bufsize;
 	driver->nt_run_cycle  = (JackDriverNTRunCycleFunction) dummy_driver_run_cycle;
