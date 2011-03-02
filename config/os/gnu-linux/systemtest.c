@@ -110,8 +110,8 @@ int system_uses_frequencyscaling() {
   while (!done) {
     (void) snprintf(filename, 256, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", cpu);
     if (0<read_string(filename, buf, 256)) {
-      if ((0!=strcmp("performance", buf)) && 
-					(0!=strcmp("powersafe", buf))) {
+            if ((0!=strncmp("performance", buf,11)) && 
+                (0!=strncmp("powersafe", buf,9))) {
 				// So it's neither the "performance" nor the "powersafe" governor
 				(void) snprintf(filename, 256, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_min_freq", cpu);
 				if (read_int(filename, &min)) {
@@ -229,13 +229,13 @@ int system_user_can_rtprio() {
 
   memset(&schparam, 0, sizeof(struct sched_param));
 
-  if (-1 == (min_prio = sched_get_priority_min(SCHED_RR))) {
+  if (-1 == (min_prio = sched_get_priority_min(SCHED_FIFO))) {
     perror("sched_get_priority");
     exit(EXIT_FAILURE);
   }
   schparam.sched_priority = min_prio;  
 
-  if (0 == sched_setscheduler(0, SCHED_RR, &schparam)) {
+  if (0 == sched_setscheduler(0, SCHED_FIFO, &schparam)) {
     // TODO: restore previous state
     schparam.sched_priority = 0;
     if (0 != sched_setscheduler(0, SCHED_OTHER, &schparam)) {

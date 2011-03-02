@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include <config.h>
+#include <sys/mman.h>
 
 #include <jack/jack.h>
 #include <jack/types.h>
@@ -214,6 +215,22 @@ jack_port_new (const jack_client_t *client, jack_port_id_t port_id,
 		(void **) &client->port_segment[ptid].attached_at;
 
 	return port;
+}
+
+size_t 
+jack_port_type_get_buffer_size (jack_client_t *client, const char *port_type)
+{
+	int i;
+
+	for (i=0; i<client->engine->n_port_types; i++) {
+		if (!strcmp(port_type, client->engine->port_types[i].type_name))
+			break;
+	}
+
+	if (i==client->engine->n_port_types)
+		return 0;
+
+	return jack_port_type_buffer_size (&(client->engine->port_types[i]), client->control->nframes);
 }
 
 jack_port_t *
@@ -522,6 +539,18 @@ void
 jack_port_set_latency (jack_port_t *port, jack_nframes_t nframes)
 {
 	port->shared->latency = nframes;
+	
+	/* setup the new latency values here,
+	 * so we dont need to change the backend codes.
+	 */
+	if (port->shared->flags & JackPortIsOutput) {
+		port->shared->capture_latency.min = nframes;
+		port->shared->capture_latency.max = nframes;
+	}
+	if (port->shared->flags & JackPortIsInput) {
+		port->shared->playback_latency.min = nframes;
+		port->shared->playback_latency.max = nframes;
+	}
 }
 
 void *
@@ -536,6 +565,10 @@ jack_port_get_buffer (jack_port_t *port, jack_nframes_t nframes)
 		if (port->tied) {
 			return jack_port_get_buffer (port->tied, nframes);
 		}
+                
+                if (port->client_segment_base == NULL || *port->client_segment_base == MAP_FAILED) {
+                        return NULL;
+                }
 
 		return jack_output_port_buffer (port);
 	}
@@ -547,6 +580,10 @@ jack_port_get_buffer (jack_port_t *port, jack_nframes_t nframes)
 	*/
 	if ((node = port->connections) == NULL) {
 		
+                if (port->client_segment_base == NULL || *port->client_segment_base == MAP_FAILED) {
+                        return NULL;
+                }
+
 		/* no connections; return a zero-filled buffer */
 		return (void *) (*(port->client_segment_base) + port->type_info->zero_buffer_offset);
 	}
@@ -794,6 +831,37 @@ jack_port_unset_alias (jack_port_t *port, const char *alias)
 	return 0;
 }
 
+void 
+jack_port_set_latency_range (jack_port_t *port, jack_latency_callback_mode_t mode, jack_latency_range_t *range)
+{
+	if (mode == JackCaptureLatency) {
+		port->shared->capture_latency = *range;
+
+		/* hack to set port->shared->latency up for 
+		 * backend ports
+		 */
+		if ((port->shared->flags & JackPortIsOutput) && (port->shared->flags & JackPortIsPhysical))
+			port->shared->latency = (range->min + range->max) / 2;
+	} else {
+		port->shared->playback_latency = *range;
+
+		/* hack to set port->shared->latency up for 
+		 * backend ports
+		 */
+		if ((port->shared->flags & JackPortIsInput) && (port->shared->flags & JackPortIsPhysical))
+			port->shared->latency = (range->min + range->max) / 2;
+
+	}
+}
+
+void 
+jack_port_get_latency_range (jack_port_t *port, jack_latency_callback_mode_t mode, jack_latency_range_t *range)
+{
+	if (mode == JackCaptureLatency)
+		*range = port->shared->capture_latency;
+	else
+		*range = port->shared->playback_latency;
+}
 
 /* AUDIO PORT SUPPORT */
 

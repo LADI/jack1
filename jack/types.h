@@ -22,6 +22,7 @@
 #define __jack_types_h__
 
 #include <inttypes.h>
+#include <pthread.h>
 
 typedef int32_t jack_shmsize_t;
 
@@ -73,6 +74,12 @@ typedef struct _jack_client  jack_client_t;
  */
 typedef uint32_t	     jack_port_id_t;
 
+/**
+ *  to make jack API independent of different thread implementations,
+ *  we define jack_native_thread_t to pthread_t here.
+ *  (all platforms that jack1 runs on, have pthread)
+ */
+typedef pthread_t            jack_native_thread_t;
 
 /**
  *  @ref jack_options_t bits
@@ -218,6 +225,60 @@ enum JackStatus {
  *  OR-ing together the relevant @ref JackStatus bits.
  */
 typedef enum JackStatus jack_status_t;
+
+/**
+ *  @ref jack_latency_callback_mode_t
+ */
+enum JackLatencyCallbackMode {
+
+     /**
+      * Latency Callback for Capture Latency.
+      * Input Ports have their latency value setup.
+      * In the Callback the client needs to set the latency of the output ports
+      */
+     JackCaptureLatency,
+
+     /**
+      * Latency Callback for Playback Latency.
+      * Output Ports have their latency value setup.
+      * In the Callback the client needs to set the latency of the input ports
+      */
+     JackPlaybackLatency
+
+};
+
+/**
+ *  Type of Latency Callback (Capture or Playback)
+ */
+typedef enum JackLatencyCallbackMode jack_latency_callback_mode_t;
+
+/**
+ * Prototype for the client supplied function that is called 
+ * by the engine when port latencies need to be recalculated
+ *
+ * @param mode playback or capture latency
+ * @param arg pointer to a client supplied data
+ *
+ * @return zero on success, non-zero on error
+ */ 
+typedef void (*JackLatencyCallback)(jack_latency_callback_mode_t mode, void *arg);
+
+/**
+ * the new latency API operates on Ranges.
+ */
+struct _jack_latency_range
+{
+    /**
+     * minimum latency
+     */
+    jack_nframes_t min;
+    /**
+     * maximum latency
+     */
+    jack_nframes_t max;
+};
+
+typedef struct _jack_latency_range jack_latency_range_t;
 
 /**
  * Prototype for the client supplied function that is called 

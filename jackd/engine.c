@@ -136,7 +136,8 @@ static int jack_do_session_notify (jack_engine_t *engine, jack_request_t *req, i
 static void jack_do_get_client_by_uuid ( jack_engine_t *engine, jack_request_t *req);
 static void jack_do_reserve_name ( jack_engine_t *engine, jack_request_t *req);
 static void jack_do_session_reply (jack_engine_t *engine, jack_request_t *req );
-
+static void jack_compute_new_latency (jack_engine_t *engine);
+static int jack_do_has_session_cb (jack_engine_t *engine, jack_request_t *req);
 
 static inline int 
 jack_rolling_interval (jack_time_t period_usecs)
@@ -1346,6 +1347,7 @@ do_request (jack_engine_t *engine, jack_request_t *req, int *reply_fd)
 	case RecomputeTotalLatencies:
 		jack_lock_graph (engine);
 		jack_compute_all_port_total_latencies (engine);
+		jack_compute_new_latency (engine);
 		jack_unlock_graph (engine);
 		req->status = 0;
 		break;
@@ -1382,6 +1384,10 @@ do_request (jack_engine_t *engine, jack_request_t *req, int *reply_fd)
 		}
 		jack_unlock_graph (engine);
 		break;
+	case SessionHasCallback:
+		jack_rdlock_graph (engine);
+		req->status = jack_do_has_session_cb (engine, req);
+		jack_unlock_graph (engine);
 	default:
 		/* some requests are handled entirely on the client
 		 * side, by adjusting the shared memory area(s) */
@@ -2710,6 +2716,21 @@ error_out:
 	return -3;
 }
 
+static int
+jack_do_has_session_cb (jack_engine_t *engine, jack_request_t *req)
+{
+	jack_client_internal_t *client;
+	int retval = -1;
+
+	client = jack_client_by_name (engine, req->x.name);
+	if (client == NULL)
+		goto out;
+
+	retval = client->control->session_cbset ? 1 : 0;
+out:
+	return retval;
+}
+
 static void jack_do_session_reply (jack_engine_t *engine, jack_request_t *req )
 {
 	jack_client_id_t client_id = req->x.client_id;
@@ -2840,6 +2861,10 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 				client->private_client->xrun
 					(client->private_client->xrun_arg);
 			}
+			break;
+
+		case LatencyCallback:
+			jack_client_handle_latency_callback (client->private_client, event, (client->control->type == ClientDriver));
 			break;
 
 		default:
@@ -3277,6 +3302,43 @@ jack_compute_all_port_total_latencies (jack_engine_t *engine)
  	}
 }
 
+static void
+jack_compute_new_latency (jack_engine_t *engine)
+{
+	JSList *node;
+	JSList *reverse_list = NULL;
+
+	jack_event_t event;
+	event.type = LatencyCallback;
+	event.x.n  = 0;
+
+	/* iterate over all clients in graph order, and emit
+	 * capture latency callback.
+	 * also builds up list in reverse graph order.
+	 */
+	for (node = engine->clients; node; node = jack_slist_next(node)) {
+
+                jack_client_internal_t* client = (jack_client_internal_t *) node->data;
+		reverse_list = jack_slist_prepend (reverse_list, client);
+		jack_deliver_event (engine, client, &event);
+	}
+
+	jack_deliver_event (engine, engine->driver->internal_client, &event);
+
+	/* now issue playback latency callbacks in reverse graphorder
+	 */
+	event.x.n  = 1;
+	for (node = reverse_list; node; node = jack_slist_next(node)) {
+                jack_client_internal_t* client = (jack_client_internal_t *) node->data;
+		jack_deliver_event (engine, client, &event);
+	}
+
+	jack_deliver_event (engine, engine->driver->internal_client, &event);
+
+	jack_slist_free (reverse_list);
+}
+
+
 /* How the sort works:
  *
  * Each client has a "sortfeeds" list of clients indicating which clients
@@ -3303,7 +3365,7 @@ jack_compute_all_port_total_latencies (jack_engine_t *engine)
  * This is used to detect whether the graph has become acyclic.
  *
  */ 
- 
+
 void
 jack_sort_graph (jack_engine_t *engine)
 {
@@ -3314,6 +3376,7 @@ jack_sort_graph (jack_engine_t *engine)
 					   (JCompareFunc) jack_client_sort);
 	jack_compute_all_port_total_latencies (engine);
 	jack_rechain_graph (engine);
+	jack_compute_new_latency (engine);
 	VERBOSE (engine, "-- jack_sort_graph");
 }
 
@@ -4170,6 +4233,8 @@ next:
 	shared->client_id = req->x.port_info.client_id;
 	shared->flags = req->x.port_info.flags;
 	shared->latency = 0;
+	shared->capture_latency.min = shared->capture_latency.max = 0;
+	shared->playback_latency.min = shared->playback_latency.max = 0;
 	shared->monitor_requests = 0;
 
 	port = &engine->internal_ports[port_id];

@@ -90,11 +90,14 @@ little clearer:
     - @ref ServerControl
     - @ref PortFunctions
     - @ref PortSearching
+    - @ref LatencyFunctions
     - @ref TimeFunctions
     - @ref TransportControl
     - @ref ErrorOutput
     - @ref NonCallbackAPI
     - @ref MIDIAPI
+    - @ref SessionClientFunctions
+    - @ref WeakLinkage
 
 The full API is described in:
 
@@ -115,6 +118,8 @@ The full API is described in:
   creation for JACK and its clients.
   - @ref midiport.h "<jack/midiport.h>" functions to handle reading
   and writing of MIDI data to a port
+  - @ref session.h "<jack/session.h>" functions that form the JACK
+  session API
 
 In addition, the tools directory provides numerous examples
 of simple JACK clients that nevertheless use the API to do something
@@ -140,7 +145,7 @@ porting-guide document.
 
 @section license License
 
-Copyright (C) 2001-2008 by Paul Davis and others.
+Copyright (C) 2001-2011 by Paul Davis, Stephane Letz, Jack O'Quinn, Torben Hohn and others.
 
 JACK is free software; you can redistribute it and/or modify it under
 the terms of the GNU GPL and LGPL licenses as published by the Free

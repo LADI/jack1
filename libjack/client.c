@@ -552,6 +552,137 @@ jack_client_handle_session_callback (jack_client_t *client, jack_event_t *event)
 	}
 	return 1;
 }
+
+static void
+jack_port_recalculate_latency (jack_port_t *port, jack_latency_callback_mode_t mode)
+{
+	jack_latency_range_t latency = { UINT32_MAX, 0 };
+	JSList *node;
+
+	pthread_mutex_lock (&port->connection_lock);
+	for (node = port->connections; node; node = jack_slist_next (node)) {
+		jack_port_t *other = node->data;
+		jack_latency_range_t other_latency;
+
+		jack_port_get_latency_range (other, mode, &other_latency);
+
+		if (other_latency.max > latency.max)
+			latency.max = other_latency.max;
+		if (other_latency.min < latency.min)
+			latency.min = other_latency.min;
+
+	}
+	pthread_mutex_unlock (&port->connection_lock);
+
+	if (latency.min == UINT32_MAX)
+		latency.min = 0;
+
+	jack_port_set_latency_range (port, mode, &latency);
+}
+
+int
+jack_client_handle_latency_callback (jack_client_t *client, jack_event_t *event, int is_driver)
+{
+	jack_latency_callback_mode_t mode = (event->x.n==0) ? JackCaptureLatency : JackPlaybackLatency;
+	JSList *node;
+	jack_latency_range_t latency = { UINT32_MAX, 0 };
+
+	/* first setup all latency values of the ports.
+	 * this is based on the connections of the ports.
+	 */
+	for (node = client->ports; node; node = jack_slist_next (node)) {
+		jack_port_t *port = node->data;
+
+		if ((jack_port_flags (port) & JackPortIsOutput) && (mode == JackPlaybackLatency)) {
+			jack_port_recalculate_latency (port, mode);
+		}
+		if ((jack_port_flags (port) & JackPortIsInput) && (mode == JackCaptureLatency)) {
+			jack_port_recalculate_latency (port, mode);
+		}
+	}
+
+	/* for a driver invocation, this is enough.
+	 * input and output ports do not depend on each other.
+	 */
+	if (is_driver)
+		return 0;
+	
+	if (! client->control->latency_cbset) {
+		/*
+		 * default action is to assume all ports depend on each other.
+		 * then always take the maximum latency.
+		 */
+
+		if (mode == JackPlaybackLatency) {
+			/* iterate over all OutputPorts, to find maximum playback latency
+			 */
+			for (node = client->ports; node; node = jack_slist_next (node)) {
+				jack_port_t *port = node->data;
+
+				if (port->shared->flags & JackPortIsOutput) {
+					jack_latency_range_t other_latency;
+
+					jack_port_get_latency_range (port, mode, &other_latency);
+					if (other_latency.max > latency.max)
+						latency.max = other_latency.max;
+					if (other_latency.min < latency.min)
+						latency.min = other_latency.min;
+				}
+			}
+
+			if (latency.min == UINT32_MAX)
+				latency.min = 0;
+
+			/* now set the found latency on all input ports
+			 */
+			for (node = client->ports; node; node = jack_slist_next (node)) {
+				jack_port_t *port = node->data;
+
+				if (port->shared->flags & JackPortIsInput) {
+					jack_port_set_latency_range (port, mode, &latency);
+				}
+			}
+		}
+		if (mode == JackCaptureLatency) {
+			/* iterate over all InputPorts, to find maximum playback latency
+			 */
+			for (node = client->ports; node; node = jack_slist_next (node)) {
+				jack_port_t *port = node->data;
+
+				if (port->shared->flags & JackPortIsInput) {
+					jack_latency_range_t other_latency;
+
+					jack_port_get_latency_range (port, mode, &other_latency);
+					if (other_latency.max > latency.max)
+						latency.max = other_latency.max;
+					if (other_latency.min < latency.min)
+						latency.min = other_latency.min;
+				}
+			}
+
+			if (latency.min == UINT32_MAX)
+				latency.min = 0;
+
+			/* now set the found latency on all output ports
+			 */
+			for (node = client->ports; node; node = jack_slist_next (node)) {
+				jack_port_t *port = node->data;
+
+				if (port->shared->flags & JackPortIsOutput) {
+					jack_port_set_latency_range (port, mode, &latency);
+				}
+			}
+		}
+		return 0;
+	}
+
+	/* we have a latency callback setup by the client,
+	 * lets use it...
+	 */
+	client->latency_cb ( mode, client->latency_cb_arg);
+	return 0;
+}
+
 #if JACK_USE_MACH_THREADS
 
 static int 
@@ -1563,6 +1694,21 @@ out:
 	return NULL;
 }
 
+int
+jack_client_has_session_callback (jack_client_t *client, const char *client_name)
+{
+	jack_request_t request;
+	int retval;
+	VALGRIND_MEMSET (&request, 0, sizeof (request));
+
+	request.type = SessionHasCallback;
+	strncpy (request.x.name, client_name, JACK_CLIENT_NAME_SIZE);
+
+	retval = jack_client_deliver_request(client, &request);
+
+	return retval;
+}
+
 void
 jack_start_freewheel (jack_client_t* client)
 {
@@ -1703,7 +1849,7 @@ jack_client_process_events (jack_client_t* client)
 			jack_client_fix_port_buffers (client);
 			if (control->bufsize_cbset) {
 				status = client->bufsize
-					(control->nframes,
+					(client->engine->buffer_size,
 					 client->bufsize_arg);
 			} 
 			break;
@@ -1736,6 +1882,9 @@ jack_client_process_events (jack_client_t* client)
 			break;
 		case SaveSession:
 			status = jack_client_handle_session_callback (client, &event );
+			break;
+		case LatencyCallback:
+			status = jack_client_handle_latency_callback (client, &event, 0 );
 			break;
 		}
 		
@@ -2474,6 +2623,10 @@ jack_set_buffer_size (jack_client_t *client, jack_nframes_t nframes)
 
         VALGRIND_MEMSET (&req, 0, sizeof (req));
 
+        if (nframes < 1 || nframes > 16384) {
+                return ERANGE;
+        }
+
 	req.type = SetBufferSize;
 	req.x.nframes = nframes;
 
@@ -2567,6 +2720,20 @@ jack_set_graph_order_callback (jack_client_t *client,
 	client->graph_order = callback;
 	client->graph_order_arg = arg;
 	client->control->graph_order_cbset = (callback != NULL);
+	return 0;
+}
+
+int 
+jack_set_latency_callback (jack_client_t *client,
+			       JackLatencyCallback callback, void *arg)
+{
+	if (client->control->active) {
+		jack_error ("You cannot set callbacks on an active client.");
+		return -1;
+	}
+	client->latency_cb = callback;
+	client->latency_cb_arg = arg;
+	client->control->latency_cbset = (callback != NULL);
 	return 0;
 }
 

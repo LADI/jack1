@@ -219,7 +219,8 @@ typedef enum  {
   StopFreewheel,
   ClientRegistered,
   ClientUnregistered,
-  SaveSession
+  SaveSession,
+  LatencyCallback
 } JackEventType;
 
 typedef struct {
@@ -298,6 +299,7 @@ typedef volatile struct {
     volatile uint8_t	client_register_cbset;
     volatile uint8_t	thread_cb_cbset;
     volatile uint8_t	session_cbset;
+    volatile uint8_t	latency_cbset;
 
 } POST_PACKED_STRUCTURE jack_client_control_t;
 
@@ -381,7 +383,8 @@ typedef enum {
 	SessionNotify = 25,
 	GetClientByUUID = 26,
 	ReserveName = 30,
-	SessionReply = 31
+	SessionReply = 31,
+	SessionHasCallback = 32
 } RequestType;
 
 struct _jack_request {
@@ -439,6 +442,7 @@ struct _jack_request {
 	jack_nframes_t nframes;
 	jack_time_t timeout;
         pid_t cap_pid;
+	char name[JACK_CLIENT_NAME_SIZE];
     } POST_PACKED_STRUCTURE x;
     int32_t status;
 } POST_PACKED_STRUCTURE;
@@ -536,6 +540,8 @@ extern int jack_port_name_equals (jack_port_shared_t* port, const char* target);
  *  MIDI events internally. 
  */
 extern size_t jack_midi_internal_event_size ();
+
+extern int jack_client_handle_latency_callback (jack_client_t *client, jack_event_t *event, int is_driver);
 
 #ifdef __GNUC__
 #  define likely(x)	__builtin_expect((x),1)

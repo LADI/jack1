@@ -39,7 +39,7 @@ int sanitycheck (int care_about_realtime,
 		  relogin++;
 		  fprintf (stderr, "Please check your /etc/security/limits.conf for the following line\n");
 		  fprintf (stderr, "and correct/add it if necessary:\n\n");
-		  fprintf(stderr, "  @audio          -       rtprio          100\n");
+		  fprintf(stderr, "  @audio          -       rtprio          99\n");
 	  } else if (!system_has_audiogroup()) {
 		  errors++;
 		  relogin++;
@@ -64,12 +64,7 @@ int sanitycheck (int care_about_realtime,
 	  fprintf(stderr, "\t   (this second option only works on relatively recent computers)\n");
 	  fprintf(stderr, "--------------------------------------------------------------------------------\n\n");
   }
-  if (system_memlock_is_unlimited()) {
-	  fprintf(stderr, "\nMemory locking is unlimited - this is dangerous. You should probably alter the line:\n");
-	  fprintf(stderr, "     @audio   -  memlock    unlimited");
-	  fprintf(stderr, "\nin your /etc/limits.conf to read:\n");
-	  fprintf(stderr, "     @audio   -  memlock    %llu\n", (system_available_physical_mem()*3)/4096);
-  } else if (0==system_memlock_amount()) {
+  if (0==system_memlock_amount()) {
 	  errors++;
 	  relogin++;
 	  fprintf(stderr, "\nYou are not allowed to lock memory. Please add a line\n");
