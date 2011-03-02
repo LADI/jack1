@@ -45,7 +45,8 @@ example-clients/jack_midisine
 example-clients/jack_showtime
 example-clients/jack_simple_client
 example-clients/jack_transport_client
-example-clients/jackrec
+example-clients/jack_rec
+example-clients/jack_latent_client
 jack/version.h
 jackd/jack_md5.h
 jackd/jackd
@@ -65,10 +66,12 @@ tools/jack_netsource
 tools/jack_thread_wait
 tools/jack_transport
 tools/jack_unload
+tools/jack_iodelay
 tools/jackrec
 man/jack_netsource.1
 man/jack_samplerate.1
 man/jack_wait.1
+man/jack_iodelay.1
 tools/jack_bufsize
 tools/jack_samplerate
 tools/jack_wait
