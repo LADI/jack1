@@ -94,6 +94,10 @@ struct jackctl_server
 	union jackctl_parameter_value replace_registry;
 	union jackctl_parameter_value default_replace_registry;
 
+	/* int32_t */
+	union jackctl_parameter_value midi_buffer_size;
+	union jackctl_parameter_value default_midi_buffer_size;
+
 	uint64_t next_client_id;
 	uint64_t next_port_id;
 	uint64_t next_connection_id;
@@ -808,6 +812,20 @@ jackctl_server jackctl_server_create(const char * name)
 		    JackParamBool,
 		    &server_ptr->replace_registry,
 		    &server_ptr->default_replace_registry,
+		    value) == NULL)
+	{
+		goto fail_free_name;
+	}
+
+	value.ui = 0;
+	if (jackctl_add_parameter(
+		    &server_ptr->parameters,
+		    "midi-bufsize",
+		    "Override MIDI buffer size",
+		    "User-specified MIDI buffer sizing. The units are \"MIDI events per process() cycle\", where an event occupies up to 4 bytes (as most common MIDI events do). The default buffer size is same as the one used for audio data, which will store about 2 MIDI events per sample. Typical values for event-count will range from 10 to about 500. Be aware that using very high values along with a large number of ports may cause JACK to fail to start because of the amount of memory that would be required.",
+		    JackParamUInt,
+		    &server_ptr->midi_buffer_size,
+		    &server_ptr->default_midi_buffer_size,
 		    value) == NULL)
 	{
 		goto fail_free_name;
@@ -1639,6 +1657,7 @@ jackctl_server_start(
 	jackctl_ports_disconnected_callback ports_disconnected_callback)
 {
 	int rc;
+	jack_port_type_info_t * port_type;
 
 	switch (server_ptr->clock_source.c)
 	{
@@ -1663,6 +1682,17 @@ jackctl_server_start(
 			"'s' for System timer",
 			server_ptr->clock_source.c);
 		return false;
+	}
+
+	port_type = &jack_builtin_port_types[JACK_MIDI_PORT_TYPE];
+	if (server_ptr->midi_buffer_size.ui != 0) {
+		port_type->buffer_size = server_ptr->midi_buffer_size.ui * jack_midi_internal_event_size ();
+		port_type->buffer_scale_factor = -1;
+		if (server_ptr->verbose.b) {
+			jack_info ("Set MIDI buffer size to %u bytes", (unsigned int)port_type->buffer_size);
+		}
+	} else {
+		port_type->buffer_scale_factor = 1;
 	}
 
 	rc = jack_register_server(server_ptr->name, server_ptr->replace_registry.b);
