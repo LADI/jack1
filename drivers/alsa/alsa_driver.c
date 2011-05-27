@@ -233,102 +233,85 @@ alsa_driver_hw_specific (alsa_driver_t *driver, int hw_monitoring,
 static void
 alsa_driver_setup_io_function_pointers (alsa_driver_t *driver)
 {
-	if (SND_PCM_FORMAT_FLOAT_LE == driver->playback_sample_format) {
-		if (driver->playback_interleaved) {
-			driver->channel_copy = memcpy_interleave_d32_s32;
+	if (driver->playback_handle) {
+		if (SND_PCM_FORMAT_FLOAT_LE == driver->playback_sample_format) {
+			driver->write_via_copy = sample_move_dS_floatLE;
 		} else {
-			driver->channel_copy = memcpy_fake;
-		}
-		driver->read_via_copy = sample_move_floatLE_sSs;
-		driver->write_via_copy = sample_move_dS_floatLE;
-	} else {
+			switch (driver->playback_sample_bytes) {
+			case 2:
+				switch (driver->dither) {
+				case Rectangular:
+					jack_info("Rectangular dithering at 16 bits");
+					driver->write_via_copy = driver->quirk_bswap?
+						sample_move_dither_rect_d16_sSs:
+						sample_move_dither_rect_d16_sS;
+					break;
 
-		switch (driver->playback_sample_bytes) {
-		case 2:
-			if (driver->playback_interleaved) {
-				driver->channel_copy = memcpy_interleave_d16_s16;
-			} else {
-				driver->channel_copy = memcpy_fake;
-			}
-			
-			switch (driver->dither) {
-			case Rectangular:
-				jack_info("Rectangular dithering at 16 bits");
-				driver->write_via_copy = driver->quirk_bswap?
-                                        sample_move_dither_rect_d16_sSs:
-                                        sample_move_dither_rect_d16_sS;
+				case Triangular:
+					jack_info("Triangular dithering at 16 bits");
+					driver->write_via_copy = driver->quirk_bswap?
+						sample_move_dither_tri_d16_sSs:
+						sample_move_dither_tri_d16_sS;
+					break;
+
+				case Shaped:
+					jack_info("Noise-shaped dithering at 16 bits");
+					driver->write_via_copy = driver->quirk_bswap?
+						sample_move_dither_shaped_d16_sSs:
+						sample_move_dither_shaped_d16_sS;
+					break;
+
+				default:
+					driver->write_via_copy = driver->quirk_bswap?
+						sample_move_d16_sSs : 
+						sample_move_d16_sS;
+					break;
+				}
 				break;
-				
-			case Triangular:
-				jack_info("Triangular dithering at 16 bits");
+
+			case 3: /* NO DITHER */
 				driver->write_via_copy = driver->quirk_bswap?
-                                        sample_move_dither_tri_d16_sSs:
-                                        sample_move_dither_tri_d16_sS;
+					sample_move_d24_sSs: 
+					sample_move_d24_sS;
+
 				break;
-				
-			case Shaped:
-				jack_info("Noise-shaped dithering at 16 bits");
+
+			case 4: /* NO DITHER */
 				driver->write_via_copy = driver->quirk_bswap?
-                                        sample_move_dither_shaped_d16_sSs:
-                                        sample_move_dither_shaped_d16_sS;
+					sample_move_d32u24_sSs: 
+					sample_move_d32u24_sS;
 				break;
-				
+
 			default:
-				driver->write_via_copy = driver->quirk_bswap?
-                                        sample_move_d16_sSs : 
-        				sample_move_d16_sS;
-				break;
+				jack_error ("impossible sample width (%d) discovered!",
+						driver->playback_sample_bytes);
+				exit (1);
 			}
-			break;
-			
-		case 3: /* NO DITHER */
-			if (driver->playback_interleaved) {
-				driver->channel_copy = memcpy_interleave_d24_s24;
-			} else {
-				driver->channel_copy = memcpy_fake;
-			}
-			
-			driver->write_via_copy = driver->quirk_bswap?
-				sample_move_d24_sSs: 
-				sample_move_d24_sS;
-
-			break;
-									
-	 	case 4: /* NO DITHER */
-			if (driver->playback_interleaved) {
-				driver->channel_copy = memcpy_interleave_d32_s32;
-			} else {
-				driver->channel_copy = memcpy_fake;
-			}
-
-			driver->write_via_copy = driver->quirk_bswap?
-				sample_move_d32u24_sSs: 
-				sample_move_d32u24_sS;
-		    break;
-
-		default:
-			jack_error ("impossible sample width (%d) discovered!",
-				    driver->playback_sample_bytes);
-			exit (1);
 		}
 	}
 	
-	switch (driver->capture_sample_bytes) {
-	case 2:
-		driver->read_via_copy = driver->quirk_bswap?
-			sample_move_dS_s16s: 
-		        sample_move_dS_s16;
-		break;
-	case 3:
-		driver->read_via_copy = driver->quirk_bswap?
-			sample_move_dS_s24s: 
-		        sample_move_dS_s24;
-		break;
-	case 4:
-		driver->read_via_copy = driver->quirk_bswap?
-		 	sample_move_dS_s32u24s: 
-		        sample_move_dS_s32u24;
-		break;
+	if (driver->capture_handle) {
+		if (SND_PCM_FORMAT_FLOAT_LE == driver->capture_sample_format) {
+			driver->read_via_copy = sample_move_floatLE_sSs;
+		} else {
+			switch (driver->capture_sample_bytes) {
+			case 2:
+				driver->read_via_copy = driver->quirk_bswap?
+					sample_move_dS_s16s: 
+					sample_move_dS_s16;
+				break;
+			case 3:
+				driver->read_via_copy = driver->quirk_bswap?
+					sample_move_dS_s24s: 
+					sample_move_dS_s24;
+				break;
+			case 4:
+				driver->read_via_copy = driver->quirk_bswap?
+					sample_move_dS_s32u24s: 
+					sample_move_dS_s32u24;
+				break;
+			}
+		}
 	}
 }
 
@@ -1987,6 +1970,108 @@ alsa_driver_delete (alsa_driver_t *driver)
 	free (driver);
 }
 
+static char*
+discover_alsa_using_apps ()
+{
+        char found[2048];
+        char command[5192];
+        char* path = getenv ("PATH");
+        char* dir;
+        size_t flen = 0;
+        int card;
+        int device;
+        size_t cmdlen = 0;
+
+        if (!path) {
+                return NULL;
+        }
+
+        /* look for lsof and give up if its not in PATH */
+
+        path = strdup (path);
+        dir = strtok (path, ":");
+        while (dir) {
+                char maybe[PATH_MAX+1];
+                snprintf (maybe, sizeof(maybe), "%s/lsof", dir);
+                if (access (maybe, X_OK)) {
+                        break;
+                }
+                dir = strtok (NULL, ":");
+        }
+        free (path);
+
+        if (!dir) {
+                return NULL;
+        }
+
+        snprintf (command, sizeof (command), "lsof -Fc0 ");
+        cmdlen = strlen (command);
+
+        for (card = 0; card < 8; ++card) {
+                for (device = 0; device < 8; ++device)  {
+                        char buf[32];
+                        
+                        snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dp", card, device);
+                        if (access (buf, F_OK) == 0) {
+                                snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
+                        }
+                        cmdlen = strlen (command);
+
+                        snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dc", card, device);
+                        if (access (buf, F_OK) == 0) {
+                                snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
+                        }
+                        cmdlen = strlen (command);
+                }
+        }
+
+        FILE* f = popen (command, "r");
+
+        if (!f) {
+                return NULL;
+        }
+
+        while (!feof (f)) {
+                char buf[1024]; /* lsof doesn't output much */
+
+                if (!fgets (buf, sizeof (buf), f)) {
+                        break;
+                }
+
+                if (*buf != 'p') {
+                        return NULL;
+                }
+
+                /* buf contains NULL as a separator between the process field and the command field */
+                char *pid = buf;
+                ++pid; /* skip leading 'p' */
+                char *cmd = pid;
+
+                /* skip to NULL */
+                while (*cmd) {
+                        ++cmd;
+                }
+                ++cmd; /* skip to 'c' */
+                ++cmd; /* skip to first character of command */
+
+                snprintf (found+flen, sizeof (found)-flen, "%s (process ID %s)\n", cmd, pid);
+                flen = strlen (found);
+
+                if (flen >= sizeof (found)) {
+                        break;
+                }
+        }
+        
+        pclose (f);
+
+        if (flen) {
+                return strdup (found);
+        } else {
+                return NULL;
+        }
+}
+        
+
 static jack_driver_t *
 alsa_driver_new (char *name, char *playback_alsa_device,
 		 char *capture_alsa_device,
@@ -2010,7 +2095,7 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 		 )
 {
 	int err;
-
+        char* current_apps;
 	alsa_driver_t *driver;
 
 	jack_info ("creating alsa driver ... %s|%s|%" PRIu32 "|%" PRIu32
@@ -2106,11 +2191,23 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 				  SND_PCM_NONBLOCK) < 0) {
 			switch (errno) {
 			case EBUSY:
-				jack_error ("the playback device \"%s\" is "
-					    "already in use. Please stop the"
-					    " application using it and "
-					    "run JACK again",
-					    playback_alsa_device);
+                                current_apps = discover_alsa_using_apps ();
+                                if (current_apps) {
+                                        jack_error ("\n\nATTENTION: The playback device \"%s\" is "
+                                                    "already in use. The following applications "
+                                                    " are using your soundcard(s) so you should "
+                                                    " check them and stop them as necessary before "
+                                                    " trying to start JACK again:\n\n%s",
+                                                    playback_alsa_device,
+                                                    current_apps);
+                                        free (current_apps);
+                                } else {
+                                        jack_error ("\n\nATTENTION: The playback device \"%s\" is "
+                                                    "already in use. Please stop the"
+                                                    " application using it and "
+                                                    "run JACK again",
+                                                    playback_alsa_device);
+                                } 
 				alsa_driver_delete (driver);
 				return NULL;
 				break;
@@ -2139,11 +2236,23 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 				  SND_PCM_NONBLOCK) < 0) {
 			switch (errno) {
 			case EBUSY:
-				jack_error ("the capture device \"%s\" is "
-					    "already in use. Please stop the"
-					    " application using it and "
-					    "run JACK again",
-					    capture_alsa_device);
+                                current_apps = discover_alsa_using_apps ();
+                                if (current_apps) {
+                                        jack_error ("\n\nATTENTION: The capture device \"%s\" is "
+                                                    "already in use. The following applications "
+                                                    " are using your soundcard(s) so you should "
+                                                    " check them and stop them as necessary before "
+                                                    " trying to start JACK again:\n\n%s",
+                                                    capture_alsa_device,
+                                                    current_apps);
+                                        free (current_apps);
+                                } else {
+                                        jack_error ("\n\nATTENTION: The capture (recording) device \"%s\" is "
+                                                    "already in use. Please stop the"
+                                                    " application using it and "
+                                                    "run JACK again",
+                                                    capture_alsa_device);
+                                }
 				alsa_driver_delete (driver);
 				return NULL;
 				break;

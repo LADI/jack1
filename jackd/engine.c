@@ -2298,17 +2298,15 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 	
 	DEBUG("run process\n");
 
-	if (jack_engine_process (engine, nframes) == 0) {
-		if (!engine->freewheeling) {
-			if (driver->write (driver, nframes)) {
-				goto unlock;
-			}
-		}
-
-	} else {
+	if (jack_engine_process (engine, nframes) != 0) {
 		DEBUG ("engine process cycle failed");
 		jack_check_client_status (engine);
+	}
 		
+	if (!engine->freewheeling) {
+		if (driver->write (driver, nframes)) {
+			goto unlock;
+		}
 	}
 
 	jack_engine_post_process (engine);
@@ -4167,7 +4165,7 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 	}
 
 	if ((port = jack_get_port_by_name(engine, req->x.port_info.name)) != NULL) {
-		jack_error ("duplicate port name in port registration request");
+		jack_error ("duplicate port name (%s) in port registration request", req->x.port_info.name);
 		jack_unlock_graph (engine);
 		return -1;
 	}
