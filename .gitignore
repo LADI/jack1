@@ -78,3 +78,6 @@ tools/jack_wait
 example-clients/jack_simple_session_client
 tools/jack_midi_dump
 tools/jack_session_notify
+example-clients/jack_server_control
+man/jack_load_test.1
+tools/jack_load_test
