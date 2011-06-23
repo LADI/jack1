@@ -81,3 +81,4 @@ tools/jack_session_notify
 example-clients/jack_server_control
 man/jack_load_test.1
 tools/jack_load_test
+*.pyc
