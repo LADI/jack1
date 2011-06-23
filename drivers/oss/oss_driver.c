@@ -81,6 +81,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'r',
 	  JackDriverParamUInt,
 	  { .ui = OSS_DRIVER_DEF_FS },
+	  NULL,
 	  "sample rate",
 	  "sample rate"
 	},
@@ -88,6 +89,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'p',
 	  JackDriverParamUInt,
 	  { .ui = OSS_DRIVER_DEF_BLKSIZE },
+	  NULL,
 	  "period size",
 	  "period size"
 	},
@@ -95,6 +97,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'n',
 	  JackDriverParamUInt,
 	  { .ui = OSS_DRIVER_DEF_NPERIODS },
+	  NULL,
 	  "number of periods in buffer",
 	  "number of periods in buffer"
 	},
@@ -102,6 +105,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'w',
 	  JackDriverParamInt,
 	  { .i = OSS_DRIVER_DEF_BITS },
+	  NULL,
 	  "word length",
 	  "word length"
 	},
@@ -109,6 +113,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'i',
 	  JackDriverParamUInt,
 	  { .ui = OSS_DRIVER_DEF_INS },
+	  NULL,
 	  "capture channels",
 	  "capture channels"
 	},
@@ -116,6 +121,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'o',
 	  JackDriverParamUInt,
 	  { .ui = OSS_DRIVER_DEF_OUTS },
+	  NULL,
 	  "playback channels",
 	  "playback channels"
 	},
@@ -123,6 +129,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'C',
 	  JackDriverParamString,
 	  { .str = OSS_DRIVER_DEF_DEV },
+	  NULL,
 	  "input device",
 	  "input device"
 	},
@@ -130,6 +137,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'P',
 	  JackDriverParamString,
 	  { .str = OSS_DRIVER_DEF_DEV },
+	  NULL,
 	  "output device",
 	  "output device"
 	},
@@ -137,6 +145,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'b',
 	  JackDriverParamBool,
 	  { },
+	  NULL,
 	  "ignore hardware period size",
 	  "ignore hardware period size"
 	},
@@ -144,6 +153,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'I',
 	  JackDriverParamUInt,
 	  { .ui = 0 },
+	  NULL,
 	  "system input latency",
 	  "system input latency"
 	},
@@ -151,6 +161,7 @@ const static jack_driver_param_desc_t oss_params[OSS_DRIVER_N_PARAMS] = {
 	  'O',
 	  JackDriverParamUInt,
 	  { .ui = 0 },
+	  NULL,
 	  "system output latency",
 	  "system output latency"
 	}
@@ -170,7 +181,7 @@ static void set_period_size (oss_driver_t *driver,
 		((double) driver->period_size /
 		(double) driver->sample_rate) * 1e6;
 	driver->last_wait_ust = 0;
-	driver->last_periodtime = jack_get_microseconds();
+	driver->last_periodtime = driver->engine->get_microseconds();
 	driver->next_periodtime = 0;
 	driver->iodelay = 0.0F;
 }
@@ -178,7 +189,7 @@ static void set_period_size (oss_driver_t *driver,
 
 static inline void update_times (oss_driver_t *driver)
 {
-	driver->last_periodtime = jack_get_microseconds();
+	driver->last_periodtime = driver->engine->get_microseconds();
 	if (driver->next_periodtime > 0)
 	{
 		driver->iodelay = (float)
@@ -748,7 +759,7 @@ static int oss_driver_start (oss_driver_t *driver)
 	if (driver->threads & 1) sem_post(&driver->sem_start);
 	if (driver->threads & 2) sem_post(&driver->sem_start);
 
-	driver->last_periodtime = jack_get_microseconds();
+	driver->last_periodtime = driver->engine->get_microseconds();
 	driver->next_periodtime = 0;
 	driver->iodelay = 0.0F;
 

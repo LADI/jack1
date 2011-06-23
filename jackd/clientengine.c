@@ -33,6 +33,7 @@
 #include <jack/engine.h>
 #include <jack/messagebuffer.h>
 #include <jack/version.h>
+#include <jack/driver.h>
 #include <sysdeps/poll.h>
 #include <sysdeps/ipc.h>
 
@@ -157,7 +158,7 @@ jack_zombify_client (jack_engine_t *engine, jack_client_internal_t *client)
 	jack_client_do_deactivate (engine, client, FALSE);
 }
 
-static void
+void
 jack_remove_client (jack_engine_t *engine, jack_client_internal_t *client)
 {
 	JSList *node;
@@ -236,7 +237,7 @@ jack_remove_client (jack_engine_t *engine, jack_client_internal_t *client)
 	}
 }
 
-void
+int
 jack_check_clients (jack_engine_t* engine, int with_timeout_check)
 {
 	/* CALLER MUST HOLD graph read lock */
@@ -269,9 +270,32 @@ jack_check_clients (jack_engine_t* engine, int with_timeout_check)
 			
 			if (client->control->awake_at > 0) {
 				if (client->control->finished_at == 0) {
-					client->control->timed_out++;
-					client->error++;
-					VERBOSE (engine, "client %s has timed out", client->control->name);
+					jack_time_t now = jack_get_microseconds();
+
+					if ((now - client->control->awake_at) < engine->driver->period_usecs) {
+						/* we give the client a bit of time, to finish the cycle
+						 * we assume here, that we dont get signals delivered to this thread.
+						 */
+						struct timespec wait_time;
+						wait_time.tv_sec = 0;
+						wait_time.tv_nsec = (engine->driver->period_usecs - (now - client->control->awake_at)) * 1000;
+						VERBOSE (engine, "client %s seems to have timed out. we may have mercy of %d ns."  , client->control->name, (int) wait_time.tv_nsec );
+						nanosleep (&wait_time, NULL);
+					}
+
+					if (client->control->finished_at == 0) {
+						client->control->timed_out++;
+						client->error++;
+						errs++;
+						VERBOSE (engine, "client %s has timed out", client->control->name);
+					} else {
+						/*
+						 * the client recovered. if this is a single occurence, thats probably fine.
+						 * however, we increase the continuous_stream flag.
+						 */
+
+						engine->timeout_count += 1;
+					}
 				}
 			}
 		}
@@ -280,6 +304,8 @@ jack_check_clients (jack_engine_t* engine, int with_timeout_check)
 	if (errs) {
 		jack_engine_signal_problems (engine);
 	}
+
+	return errs;
 }
 
 void

@@ -115,7 +115,6 @@ static void jack_notify_all_port_interested_clients (jack_engine_t *engine,
 						     jack_port_id_t b,
 						     int connect);
 static void jack_engine_post_process (jack_engine_t *);
-static int  jack_use_driver (jack_engine_t *engine, jack_driver_t *driver);
 static int  jack_run_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 			    float delayed_usecs);
 static int   jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
@@ -531,14 +530,6 @@ jack_driver_buffer_size (jack_engine_t *engine, jack_nframes_t nframes)
 		}
 	}
 
-	/* update shared client copy of nframes */
-	jack_lock_graph (engine);
-	for (node = engine->clients; node; node = jack_slist_next (node)) {
-		jack_client_internal_t *client = node->data;
-		client->control->nframes = nframes;
-	}
-	jack_unlock_graph (engine);
-
 	event.type = BufferSizeChange;
 	jack_deliver_event_to_all (engine, &event);
 
@@ -799,23 +790,25 @@ jack_process_external(jack_engine_t *engine, JSList *node)
 			 ctl->finished_at? (ctl->finished_at -
 					    ctl->signalled_at): 0);
 
-		jack_check_clients (engine, 1);
+		if (jack_check_clients (engine, 1)) {
 
-		engine->process_errors++;
-		return NULL;		/* will stop the loop */
-
-	} else {
-
-		DEBUG ("reading byte from subgraph_wait_fd==%d",
-		       client->subgraph_wait_fd);
-
-		if (read (client->subgraph_wait_fd, &c, sizeof(c))
-		    != sizeof (c)) {
-			jack_error ("pp: cannot clean up byte from graph wait "
-				    "fd (%s)", strerror (errno));
-			client->error++;
-			return NULL;	/* will stop the loop */
+			engine->process_errors++;
+			return NULL;		/* will stop the loop */
 		}
+	} else {
+		engine->timeout_count = 0;
+	}
+
+
+	DEBUG ("reading byte from subgraph_wait_fd==%d",
+	       client->subgraph_wait_fd);
+
+	if (read (client->subgraph_wait_fd, &c, sizeof(c))
+	    != sizeof (c)) {
+		jack_error ("pp: cannot clean up byte from graph wait "
+			    "fd (%s)", strerror (errno));
+		client->error++;
+		return NULL;	/* will stop the loop */
 	}
 
 	/* Move to next internal client (or end of client list) */
@@ -846,7 +839,6 @@ jack_engine_process (jack_engine_t *engine, jack_nframes_t nframes)
 		jack_client_control_t *ctl =
 			((jack_client_internal_t *) node->data)->control;
 		ctl->state = NotTriggered;
-		ctl->nframes = nframes;
 		ctl->timed_out = 0;
 		ctl->awake_at = 0;
 		ctl->finished_at = 0;
@@ -950,6 +942,16 @@ jack_start_watchdog (jack_engine_t *engine)
 	return 0;
 }
 
+void
+jack_stop_watchdog (jack_engine_t *engine)
+{
+	/* Stephane Letz : letz@grame.fr Watch dog thread is
+	 * not needed on MacOSX since CoreAudio drivers
+	 * already contains a similar mechanism.
+	 */
+	return;
+}
+
 #else
 
 static void *
@@ -1004,6 +1006,23 @@ jack_start_watchdog (jack_engine_t *engine)
 	}
 
 	return 0;
+}
+
+void
+jack_stop_watchdog (jack_engine_t *engine)
+{
+	/* Cancel the watchdog thread and wait for it to terminate.
+	 *
+	 * The watchdog thread is not used on MacOSX since CoreAudio
+	 * drivers already contain a similar mechanism.
+	 */	
+	if (engine->control->real_time && engine->watchdog_thread) {
+		VERBOSE (engine, "stopping watchdog thread");
+		pthread_cancel (engine->watchdog_thread);
+		pthread_join (engine->watchdog_thread, NULL);
+	}
+
+	return;
 }
 #endif /* !JACK_USE_MACH_THREADS */
 
@@ -1102,7 +1121,7 @@ jack_engine_load_driver (jack_engine_t *engine,
 	free (info);
 
 	if (jack_use_driver (engine, driver) < 0) {
-		jack_client_delete (engine, client);
+		jack_remove_client (engine, client);
 		return -1;
 	}
 
@@ -1115,6 +1134,46 @@ jack_engine_load_driver (jack_engine_t *engine,
 		}
 		engine->watchdog_check = 1;
 	}
+	return 0;
+}
+
+int
+jack_engine_load_slave_driver (jack_engine_t *engine,
+			       jack_driver_desc_t * driver_desc,
+			       JSList * driver_params)
+{
+	jack_client_internal_t *client;
+	jack_driver_t *driver;
+	jack_driver_info_t *info;
+
+	if ((info = jack_load_driver (engine, driver_desc)) == NULL) {
+		return -1;
+	}
+
+	if ((client = jack_create_driver_client (engine, info->client_name)
+		    ) == NULL) {
+		return -1;
+	}
+
+	if ((driver = info->initialize (client->private_client,
+					driver_params)) == NULL) {
+		free (info);
+		return -1;
+	}
+
+	driver->handle = info->handle;
+	driver->finish = info->finish;
+	driver->internal_client = client;
+	free (info);
+
+	if (jack_add_slave_driver (engine, driver) < 0) {
+		jack_client_delete (engine, client);
+		return -1;
+	}
+
+	//engine->driver_desc   = driver_desc;
+	//engine->driver_params = driver_params;
+
 	return 0;
 }
 
@@ -1718,7 +1777,7 @@ jack_engine_t *
 jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 		 const char *server_name, int temporary, int verbose,
 		 int client_timeout, unsigned int port_max, pid_t wait_pid,
-		 jack_nframes_t frame_time_offset, int nozombies, JSList *drivers)
+		 jack_nframes_t frame_time_offset, int nozombies, int timeout_count_threshold, JSList *drivers)
 {
 	jack_engine_t *engine;
 	unsigned int i;
@@ -1766,6 +1825,8 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	engine->driver_desc = NULL;
 	engine->driver_params = NULL;
 
+	engine->slave_drivers = NULL;
+
 	engine->set_sample_rate = jack_set_sample_rate;
 	engine->set_buffer_size = jack_driver_buffer_size;
 	engine->run_cycle = jack_run_cycle;
@@ -1773,6 +1834,7 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	engine->driver_exit = jack_engine_driver_exit;
 	engine->transport_cycle_start = jack_transport_cycle_start;
 	engine->client_timeout_msecs = client_timeout;
+	engine->timeout_count = 0;
 	engine->problems = 0;
 
 	engine->next_client_id = 1;	/* 0 is a NULL client ID */
@@ -1790,6 +1852,7 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 	engine->feedbackcount = 0;
 	engine->wait_pid = wait_pid;
 	engine->nozombies = nozombies;
+	engine->timeout_count_threshold = timeout_count_threshold;
 	engine->removing_clients = 0;
         engine->new_clients_allowed = 1;
 
@@ -1940,6 +2003,7 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 
 	jack_set_clock_source (clock_source);
 	engine->control->clock_source = clock_source;
+	engine->get_microseconds = jack_get_microseconds_pointer();
 
 	VERBOSE (engine, "clock source = %s", jack_clock_source_name (clock_source));
 
@@ -2082,6 +2146,85 @@ jack_engine_freewheel (void *arg)
 	return 0;
 }
 
+static void
+jack_slave_driver_remove(jack_engine_t *engine, jack_driver_t *sdriver)
+{
+	sdriver->detach (sdriver, engine);
+	engine->slave_drivers = jack_slist_remove(engine->slave_drivers, sdriver);
+
+	jack_driver_unload(sdriver);
+}
+int
+jack_drivers_start (jack_engine_t *engine)
+{
+	JSList *node;
+	JSList *failed_drivers = NULL;
+	/* first start the slave drivers */
+	for (node=engine->slave_drivers; node; node=jack_slist_next(node))
+	{
+		jack_driver_t *sdriver = node->data;
+		if (sdriver->start( sdriver ))
+			failed_drivers = jack_slist_append(failed_drivers, sdriver);
+	}
+
+	// Clean up drivers which failed to start.
+	for (node=failed_drivers; node; node=jack_slist_next(node))
+	{
+		jack_driver_t *sdriver = node->data;
+		jack_error( "slave driver %s failed to start, removing it", sdriver->internal_client->control->name );
+		jack_slave_driver_remove(engine, sdriver);
+	}
+
+	/* now the master driver is started */
+	return engine->driver->start(engine->driver);
+}
+
+static int
+jack_drivers_stop (jack_engine_t *engine)
+{
+	JSList *node;
+	/* first stop the master driver */
+	int retval = engine->driver->stop(engine->driver);
+
+	/* now the slave drivers are stopped */
+	for (node=engine->slave_drivers; node; node=jack_slist_next(node))
+	{
+		jack_driver_t *sdriver = node->data;
+		sdriver->stop( sdriver );
+	}
+
+	return retval;
+}
+
+static int
+jack_drivers_read (jack_engine_t *engine, jack_nframes_t nframes)
+{
+	JSList *node;
+	/* first read the slave drivers */
+	for (node=engine->slave_drivers; node; node=jack_slist_next(node))
+	{
+		jack_driver_t *sdriver = node->data;
+		sdriver->read (sdriver, nframes);
+	}
+
+	/* now the master driver is read */
+	return engine->driver->read(engine->driver, nframes);
+}
+
+static int
+jack_drivers_write (jack_engine_t *engine, jack_nframes_t nframes)
+{
+	JSList *node;
+	/* first start the slave drivers */
+	for (node=engine->slave_drivers; node; node=jack_slist_next(node))
+	{
+		jack_driver_t *sdriver = node->data;
+		sdriver->write (sdriver, nframes);
+	}
+
+	/* now the master driver is written */
+	return engine->driver->write(engine->driver, nframes);
+}
 static int
 jack_start_freewheeling (jack_engine_t* engine, jack_client_id_t client_id)
 {
@@ -2101,7 +2244,7 @@ jack_start_freewheeling (jack_engine_t* engine, jack_client_id_t client_id)
 	   there are no more process() calls being handled.
 	*/
 
-	if (engine->driver->stop (engine->driver)) {
+	if (jack_drivers_stop (engine)) {
 		jack_error ("could not stop driver for freewheeling");
 		return -1;
 	}
@@ -2168,7 +2311,7 @@ jack_stop_freewheeling (jack_engine_t* engine, int engine_exiting)
 		
 		/* restart the driver */
 		
-		if (engine->driver->start (engine->driver)) {
+		if (jack_drivers_start (engine)) {
 			jack_error ("could not restart driver after freewheeling");
 			return -1;
 		}
@@ -2274,7 +2417,7 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		return 0;
 	}
 
-	if (engine->problems) {
+	if (engine->problems || (engine->timeout_count_threshold && (engine->timeout_count > (1 + engine->timeout_count_threshold*1000/engine->driver->period_usecs) ))) {
 		VERBOSE (engine, "problem-driven null cycle problems=%d", engine->problems);
 		jack_unlock_problems (engine);
 		jack_unlock_graph (engine);
@@ -2291,7 +2434,7 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 		
 	if (!engine->freewheeling) {
 		DEBUG("waiting for driver read\n");
-		if (driver->read (driver, nframes)) {
+		if (jack_drivers_read (engine, nframes)) {
 			goto unlock;
 		}
 	}
@@ -2304,7 +2447,7 @@ jack_run_one_cycle (jack_engine_t *engine, jack_nframes_t nframes,
 	}
 		
 	if (!engine->freewheeling) {
-		if (driver->write (driver, nframes)) {
+		if (jack_drivers_write (engine, nframes)) {
 			goto unlock;
 		}
 	}
@@ -2469,18 +2612,8 @@ jack_engine_delete (jack_engine_t *engine)
 	pthread_join (engine->server_thread, NULL);
 #endif	
 
-#ifndef JACK_USE_MACH_THREADS 
-	/* Cancel the watchdog thread and wait for it to terminate.
-	 *
-	 * The watchdog thread is not used on MacOSX since CoreAudio
-	 * drivers already contain a similar mechanism.
-	 */	
-	if (engine->control->real_time && engine->watchdog_thread) {
-		VERBOSE (engine, "stopping watchdog thread");
-		pthread_cancel (engine->watchdog_thread);
-		pthread_join (engine->watchdog_thread, NULL);
-	}
-#endif
+	jack_stop_watchdog (engine);
+
 
 	VERBOSE (engine, "last xrun delay: %.3f usecs",
 		engine->control->xrun_delayed_usecs);
@@ -3375,6 +3508,7 @@ jack_sort_graph (jack_engine_t *engine)
 	jack_compute_all_port_total_latencies (engine);
 	jack_rechain_graph (engine);
 	jack_compute_new_latency (engine);
+	engine->timeout_count = 0;
 	VERBOSE (engine, "-- jack_sort_graph");
 }
 
@@ -4037,7 +4171,7 @@ jack_clear_fifos (jack_engine_t *engine)
 	}
 }
 
-static int
+int
 jack_use_driver (jack_engine_t *engine, jack_driver_t *driver)
 {
 	if (engine->driver) {
@@ -4060,6 +4194,19 @@ jack_use_driver (jack_engine_t *engine, jack_driver_t *driver)
 	return 0;
 }
 
+int
+jack_add_slave_driver (jack_engine_t *engine, jack_driver_t *driver)
+{
+	if (driver) {
+		if (driver->attach (driver, engine)) {
+			return -1;
+		}
+
+		engine->slave_drivers = jack_slist_append (engine->slave_drivers, driver);
+	}
+
+	return 0;
+}
 
 /* PORT RELATED FUNCTIONS */
 

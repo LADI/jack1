@@ -68,6 +68,8 @@ struct _jack_engine {
     jack_driver_desc_t    *driver_desc;
     JSList                *driver_params;
 
+    JSList                *slave_drivers;
+
     /* these are "callbacks" made by the driver backend */
     int  (*set_buffer_size) (struct _jack_engine *, jack_nframes_t frames);
     int  (*set_sample_rate) (struct _jack_engine *, jack_nframes_t frames);
@@ -76,7 +78,7 @@ struct _jack_engine {
     void (*delay)	    (struct _jack_engine *, float delayed_usecs);
     void (*transport_cycle_start) (struct _jack_engine *, jack_time_t time);
     void (*driver_exit)     (struct _jack_engine *);
-
+    jack_time_t (*get_microseconds)(void);
     /* "private" sections starts here */
 
     /* engine serialization -- use precedence for deadlock avoidance */
@@ -135,7 +137,9 @@ struct _jack_engine {
     int             removing_clients;
     pid_t           wait_pid;
     int             nozombies;
+    int             timeout_count_threshold;
     volatile int    problems;
+    volatile int    timeout_count;
     volatile int    new_clients_allowed;    
 
     /* these lists are protected by `client_lock' */
@@ -185,6 +189,7 @@ jack_engine_t  *jack_engine_new (int real_time, int real_time_priority,
 				 int verbose, int client_timeout,
 				 unsigned int port_max,
                                  pid_t waitpid, jack_nframes_t frame_time_offset, int nozombies, 
+				 int timeout_count_threshold,
 				 JSList *drivers);
 void		jack_engine_delete (jack_engine_t *);
 int		jack_run (jack_engine_t *engine);
@@ -192,6 +197,9 @@ int		jack_wait (jack_engine_t *engine);
 int		jack_engine_load_driver (jack_engine_t *engine,
 					 jack_driver_desc_t * driver_desc,
 					 JSList * driver_params);
+int		jack_engine_load_slave_driver (jack_engine_t *engine,
+					       jack_driver_desc_t * driver_desc,
+					       JSList * driver_params);
 void		jack_dump_configuration(jack_engine_t *engine, int take_lock);
 
 /* private engine functions */
@@ -254,6 +262,15 @@ jack_client_internal_t *
 jack_client_by_name (jack_engine_t *engine, const char *name);
 
 int  jack_deliver_event (jack_engine_t *, jack_client_internal_t *, jack_event_t *);
+void jack_stop_watchdog (jack_engine_t * );
+
 void
 jack_engine_signal_problems (jack_engine_t* engine);
+int
+jack_use_driver (jack_engine_t *engine, struct _jack_driver *driver);
+int
+jack_drivers_start (jack_engine_t *engine);
+int
+jack_add_slave_driver (jack_engine_t *engine, struct _jack_driver *driver);
+
 #endif /* __jack_engine_h__ */

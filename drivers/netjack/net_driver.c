@@ -60,14 +60,14 @@ net_driver_wait (net_driver_t *driver, int extra_fd, int *status, float *delayed
     netjack_driver_state_t *netj = &( driver->netj );
     int delay;
 
-    delay = netjack_wait( netj );
+    delay = netjack_wait( netj, driver->engine->get_microseconds );
     if( delay ) {
 	    //driver->engine->delay( driver->engine, (float)delay );
 	    jack_error( "netxruns amount: %dms", delay/1000 );
     }
 
     
-    driver->last_wait_ust = jack_get_microseconds ();
+    driver->last_wait_ust = driver->engine->get_microseconds ();
     driver->engine->transport_cycle_start (driver->engine, driver->last_wait_ust);
 
     /* this driver doesn't work so well if we report a delay */
