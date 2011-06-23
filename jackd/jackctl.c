@@ -840,7 +840,7 @@ jackctl_server jackctl_server_create(const char * name)
 		    &server_ptr->parameters,
 		    "timeout-threshold",
 		    "threshold for suspending processing",
-		    "",
+		    "If not zero, stop processing clients if JACK cannot complete the process cycle in time (typically caused by CPU overloading or misbehaved clients). The value specifies the number of miliseconds, during which consectutive process cycles must fail before JACK gives up. If you want to enable this behavour but are not sure about what value to set, use 250. Processing will resume on the next change to the port graph (i.e. a port is added, removed, connected or disconnected)",
 		    JackParamUInt,
 		    &server_ptr->timothres,
 		    &server_ptr->default_timothres,
