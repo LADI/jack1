@@ -98,6 +98,10 @@ struct jackctl_server
 	union jackctl_parameter_value midi_buffer_size;
 	union jackctl_parameter_value default_midi_buffer_size;
 
+	/* uint32_t */
+	union jackctl_parameter_value timothres;
+	union jackctl_parameter_value default_timothres;
+
 	uint64_t next_client_id;
 	uint64_t next_port_id;
 	uint64_t next_connection_id;
@@ -826,6 +830,20 @@ jackctl_server jackctl_server_create(const char * name)
 		    JackParamUInt,
 		    &server_ptr->midi_buffer_size,
 		    &server_ptr->default_midi_buffer_size,
+		    value) == NULL)
+	{
+		goto fail_free_name;
+	}
+
+	value.ui = 0;
+	if (jackctl_add_parameter(
+		    &server_ptr->parameters,
+		    "timeout-threshold",
+		    "threshold for suspending processing",
+		    "",
+		    JackParamUInt,
+		    &server_ptr->timothres,
+		    &server_ptr->default_timothres,
 		    value) == NULL)
 	{
 		goto fail_free_name;
@@ -1737,6 +1755,7 @@ jackctl_server_start(
 		getpid(),
 		server_ptr->frame_time_offset.i,
 		server_ptr->nozombies.b,
+		server_ptr->timothres.ui,
 		NULL);
 	if (server_ptr->engine == NULL)
 	{
