@@ -14,7 +14,8 @@ libjackinclude_HEADERS = 	\
 	types.h	\
 	midiport.h \
 	weakmacros.h \
-	weakjack.h 
+	weakjack.h \
+	control.h
 
 noinst_HEADERS =		\
 	atomicity.h		\
