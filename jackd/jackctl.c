@@ -1786,6 +1786,7 @@ jackctl_server_start(
 	}
 
 	server_ptr->xruns = 0;
+	server_ptr->engine->driver->internal_client->private_client->control->xrun_cbset = TRUE;
 	server_ptr->engine->driver->internal_client->private_client->xrun = jackctl_xrun;
 	server_ptr->engine->driver->internal_client->private_client->xrun_arg = server_ptr;
 
