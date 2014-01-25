@@ -52,6 +52,8 @@ jack/version.h
 jackd/jack_md5.h
 jackd/jackd
 jackd/jackd.1
+jackd/jackdbus
+jackd/org.jackaudio.service
 tags
 tools/alsa_in
 tools/alsa_out
