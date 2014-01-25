@@ -30,9 +30,10 @@
 #include <regex.h>
 #include <string.h>
  
-#include <jack/internal.h>
-#include <jack/engine.h>
-#include <jack/messagebuffer.h>
+#include "internal.h"
+#include "engine.h"
+#include "messagebuffer.h"
+#include "libjack/local.h"
 
 #include <sysdeps/time.h>
 
@@ -96,30 +97,47 @@ alsa_driver_check_capabilities (alsa_driver_t *driver)
 	return 0;
 }
 
+static char*
+get_control_device_name(const char * device_name)
+{
+    char * ctl_name;
+    const char * comma;
+
+    /* the user wants a hw or plughw device, the ctl name
+     * should be hw:x where x is the card identification.
+     * We skip the subdevice suffix that starts with comma */
+
+    if (strncasecmp(device_name, "plughw:", 7) == 0) {
+        /* skip the "plug" prefix" */
+        device_name += 4;
+    }
+
+    comma = strchr(device_name, ',');
+    if (comma == NULL) {
+        ctl_name = strdup(device_name);
+        if (ctl_name == NULL) {
+            jack_error("strdup(\"%s\") failed.", device_name);
+        }
+    } else {
+        ctl_name = strndup(device_name, comma - device_name);
+        if (ctl_name == NULL) {
+            jack_error("strndup(\"%s\", %u) failed.", device_name, (unsigned int)(comma - device_name));
+        }
+    }
+
+    return ctl_name;
+}
+
 static int
 alsa_driver_check_card_type (alsa_driver_t *driver)
 {
 	int err;
 	snd_ctl_card_info_t *card_info;
 	char * ctl_name;
-	regex_t expression;
 
 	snd_ctl_card_info_alloca (&card_info);
 
-	regcomp(&expression,"(plug)?hw:[0-9](,[0-9])?",REG_ICASE|REG_EXTENDED);
-	
-       	if (!regexec(&expression,driver->alsa_name_playback,0,NULL,0)) {
-		/* the user wants a hw or plughw device, the ctl name
-		 * should be hw:x where x is the card number */
-	
-		char tmp[5];
-		strncpy(tmp,strstr(driver->alsa_name_playback,"hw"),4);
-		tmp[4]='\0';
-		jack_info("control device %s",tmp);
-		ctl_name = strdup(tmp);
-	} else {
-		ctl_name = strdup(driver->alsa_name_playback);
-	}
+	ctl_name = get_control_device_name(driver->alsa_name_playback);
 
 	// XXX: I don't know the "right" way to do this. Which to use
 	// driver->alsa_name_playback or driver->alsa_name_capture.
@@ -134,7 +152,6 @@ alsa_driver_check_card_type (alsa_driver_t *driver)
 
 	driver->alsa_driver = strdup(snd_ctl_card_info_get_driver (card_info));
 
-	regfree(&expression);
 	free(ctl_name);
 
 	return alsa_driver_check_capabilities (driver);
@@ -574,6 +591,9 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 	unsigned int pr = 0;
 	unsigned int cr = 0;
 	int err;
+        jack_nframes_t old_frames_per_cycle = driver->frames_per_cycle;
+        jack_nframes_t old_rate = driver->frame_rate;
+        jack_nframes_t old_user_nperiods = driver->user_nperiods;
 
 	driver->frame_rate = rate;
 	driver->frames_per_cycle = frames_per_cycle;
@@ -595,7 +615,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 			    &driver->capture_nchannels,
 			    driver->capture_sample_bytes)) {
 			jack_error ("ALSA: cannot configure capture channel");
-			return -1;
+			goto errout;
 		}
 	}
 
@@ -611,7 +631,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 			    &driver->playback_nchannels,
 			    driver->playback_sample_bytes)) {
 			jack_error ("ALSA: cannot configure playback channel");
-			return -1;
+			goto errout;
 		}
 	}
 	
@@ -681,7 +701,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 				    PRIu32
 				    " frames but got %u frames for playback",
 				    driver->frames_per_cycle, p_period_size);
-			return -1;
+			goto errout;
 		}
 	}
 
@@ -704,7 +724,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 				    PRIu32
 				    " frames but got %uc frames for capture",
 				    driver->frames_per_cycle, p_period_size);
-			return -1;
+                        goto errout;
 		}
 	}
 
@@ -758,7 +778,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 				       &my_areas, &offset, &frames) < 0) {
 			jack_error ("ALSA: %s: mmap areas info error",
 				    driver->alsa_name_playback);
-			return -1;
+			goto errout;
 		}
 		driver->interleave_unit =
 			snd_pcm_format_physical_width (
@@ -774,7 +794,7 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 				       &my_areas, &offset, &frames) < 0) {
 			jack_error ("ALSA: %s: mmap areas info error",
 				    driver->alsa_name_capture);
-			return -1;
+			goto errout;
 		}
 	}
 
@@ -848,12 +868,24 @@ alsa_driver_set_parameters (alsa_driver_t *driver,
 	if (driver->engine) {
 		if (driver->engine->set_buffer_size (driver->engine,
 						     driver->frames_per_cycle)) {
-			jack_error ("ALSA: Cannot set engine buffer size to %d (check MIDI)", driver->frames_per_cycle);
-			return -1;
+			jack_error ("ALSA: Cannot set engine buffer size to %d", driver->frames_per_cycle);
+			goto errout;
 		}
 	}
 
+        driver->previously_successfully_configured = TRUE;
 	return 0;
+        
+    errout:
+        if (driver->previously_successfully_configured) {
+                /* attempt to restore previous configuration */
+                jack_info ("ALSA: falling back to old configuration");
+                if (alsa_driver_set_parameters (driver, old_frames_per_cycle, old_user_nperiods, old_rate) == 0) {
+                        jack_error ("ALSA: reverted to previous parameters after failure");
+                        return 0;
+                }
+        }
+        return -1;
 }	
 
 static int
@@ -985,9 +1017,6 @@ alsa_driver_start (alsa_driver_t *driver)
 		malloc (sizeof (struct pollfd) * 
 			(driver->playback_nfds + driver->capture_nfds + 2));
 
-	if (driver->midi && !driver->xrun_recovery)
-		(driver->midi->start)(driver->midi);
-
 	if (driver->playback_handle) {
 		/* fill playback buffer with zeroes, and mark 
 		   all fragments as having data.
@@ -1092,9 +1121,6 @@ alsa_driver_stop (alsa_driver_t *driver)
 		driver->hw->set_input_monitor_mask (driver->hw, 0);
 	}
 
-	if (driver->midi && !driver->xrun_recovery)
-		(driver->midi->stop)(driver->midi);
-
 	return 0;
 }
 
@@ -1107,9 +1133,6 @@ alsa_driver_restart (alsa_driver_t *driver)
  	if ((res = driver->nt_stop((struct _jack_driver_nt *) driver))==0)
 		res = driver->nt_start((struct _jack_driver_nt *) driver);
 	driver->xrun_recovery = 0;
-
-	if (res && driver->midi)
-		(driver->midi->stop)(driver->midi);
 
 	return res;
 }
@@ -1533,9 +1556,6 @@ alsa_driver_read (alsa_driver_t *driver, jack_nframes_t nframes)
 		return 0;
 	}
 
-	if (driver->midi)
-		(driver->midi->read)(driver->midi, nframes);
-	
 	if (!driver->capture_handle) {
 		return 0;
 	}
@@ -1608,9 +1628,6 @@ alsa_driver_write (alsa_driver_t* driver, jack_nframes_t nframes)
 		return -1;
 	}
 
-	if (driver->midi)
-		(driver->midi->write)(driver->midi, nframes);
-	
 	nwritten = 0;
 	contiguous = 0;
 	orig_nframes = nframes;
@@ -1721,6 +1738,25 @@ alsa_driver_run_cycle (alsa_driver_t *driver)
 	return engine->run_cycle (engine, nframes, delayed_usecs);
 }
 
+static void
+alsa_driver_latency_callback (jack_latency_callback_mode_t mode, void* arg)
+{
+        alsa_driver_t* driver = (alsa_driver_t*) arg;
+        jack_client_t* client = driver->client;
+        jack_latency_range_t range;
+        JSList* node;
+
+        if (mode == JackPlaybackLatency) {
+                range.min = range.max = driver->frames_per_cycle + driver->playback_frame_latency;
+        } else {
+                range.min = range.max = driver->frames_per_cycle + driver->capture_frame_latency;
+        }
+
+	for (node = client->ports; node; node = jack_slist_next (node)) {
+                jack_port_set_latency_range ((jack_port_t*) node->data, mode, &range);
+	}
+}
+
 static int
 alsa_driver_attach (alsa_driver_t *driver)
 {
@@ -1801,13 +1837,6 @@ alsa_driver_attach (alsa_driver_t *driver)
 		}
 	}
 
-	if (driver->midi) {
-		int err = (driver->midi->attach)(driver->midi);
-		if (err)
-			jack_error("ALSA: cannot attach midi: %d", err);
-	}
-	
-
 	return jack_activate (driver->client);
 }
 
@@ -1820,278 +1849,276 @@ alsa_driver_detach (alsa_driver_t *driver)
 		return 0;
 	}
 
-	if (driver->midi)
-		(driver->midi->detach)(driver->midi);
-	
-	for (node = driver->capture_ports; node;
-	     node = jack_slist_next (node)) {
-		jack_port_unregister (driver->client,
-				      ((jack_port_t *) node->data));
-	}
-
-	jack_slist_free (driver->capture_ports);
-	driver->capture_ports = 0;
-		
-	for (node = driver->playback_ports; node;
-	     node = jack_slist_next (node)) {
-		jack_port_unregister (driver->client,
-				      ((jack_port_t *) node->data));
-	}
-
-	jack_slist_free (driver->playback_ports);
-	driver->playback_ports = 0;
-
-	if (driver->monitor_ports) {
-		for (node = driver->monitor_ports; node;
-		     node = jack_slist_next (node)) {
-			jack_port_unregister (driver->client,
-					      ((jack_port_t *) node->data));
-		}
-		
-		jack_slist_free (driver->monitor_ports);
-		driver->monitor_ports = 0;
-	}
-	
-	return 0;
-}
-
-#if 0
-static int  /* UNUSED */
-alsa_driver_change_sample_clock (alsa_driver_t *driver, SampleClockMode mode)
-
-{
-	return driver->hw->change_sample_clock (driver->hw, mode);
-}
-
-static void  /* UNUSED */
-alsa_driver_request_all_monitor_input (alsa_driver_t *driver, int yn)
-
-{
-	if (driver->hw_monitoring) {
-		if (yn) {
-			driver->hw->set_input_monitor_mask (driver->hw, ~0U);
-		} else {
-			driver->hw->set_input_monitor_mask (
-				driver->hw, driver->input_monitor_mask);
-		}
-	}
-
-	driver->all_monitor_in = yn;
-}
-
-static void  /* UNUSED */
-alsa_driver_set_hw_monitoring (alsa_driver_t *driver, int yn)
-{
-	if (yn) {
-		driver->hw_monitoring = TRUE;
-		
-		if (driver->all_monitor_in) {
-			driver->hw->set_input_monitor_mask (driver->hw, ~0U);
-		} else {
-			driver->hw->set_input_monitor_mask (
-				driver->hw, driver->input_monitor_mask);
-		}
-	} else {
-		driver->hw_monitoring = FALSE;
-		driver->hw->set_input_monitor_mask (driver->hw, 0);
-	}
-}
-
-static ClockSyncStatus  /* UNUSED */
-alsa_driver_clock_sync_status (channel_t chn)
-{
-	return Lock;
-}
-#endif
-
-static void
-alsa_driver_delete (alsa_driver_t *driver)
-{
-	JSList *node;
-
-	if (driver->midi)
-		(driver->midi->destroy)(driver->midi);
-
-	for (node = driver->clock_sync_listeners; node;
-	     node = jack_slist_next (node)) {
-		free (node->data);
-	}
-	jack_slist_free (driver->clock_sync_listeners);
-
-	if (driver->ctl_handle) {
-		snd_ctl_close (driver->ctl_handle);
-		driver->ctl_handle = 0;
-	} 
-
-	if (driver->capture_handle) {
-		snd_pcm_close (driver->capture_handle);
-		driver->capture_handle = 0;
-	} 
-
-	if (driver->playback_handle) {
-		snd_pcm_close (driver->playback_handle);
-		driver->capture_handle = 0;
-	}
-	
-	if (driver->capture_hw_params) {
-		snd_pcm_hw_params_free (driver->capture_hw_params);
-		driver->capture_hw_params = 0;
-	}
-
-	if (driver->playback_hw_params) {
-		snd_pcm_hw_params_free (driver->playback_hw_params);
-		driver->playback_hw_params = 0;
-	}
-	
-	if (driver->capture_sw_params) {
-		snd_pcm_sw_params_free (driver->capture_sw_params);
-		driver->capture_sw_params = 0;
-	}
-	
-	if (driver->playback_sw_params) {
-		snd_pcm_sw_params_free (driver->playback_sw_params);
-		driver->playback_sw_params = 0;
-	}
-
-	if (driver->pfd) {
-		free (driver->pfd);
-	}
-	
-	if (driver->hw) {
-		driver->hw->release (driver->hw);
-		driver->hw = 0;
-	}
-	free(driver->alsa_name_playback);
-	free(driver->alsa_name_capture);
-	free(driver->alsa_driver);
-
-	alsa_driver_release_channel_dependent_memory (driver);
-        jack_driver_nt_finish ((jack_driver_nt_t *) driver);
-	free (driver);
-}
-
-static char*
-discover_alsa_using_apps ()
-{
-        char found[2048];
-        char command[5192];
-        char* path = getenv ("PATH");
-        char* dir;
-        size_t flen = 0;
-        int card;
-        int device;
-        size_t cmdlen = 0;
-
-        if (!path) {
-                return NULL;
+        for (node = driver->capture_ports; node;
+             node = jack_slist_next (node)) {
+                jack_port_unregister (driver->client,
+                                      ((jack_port_t *) node->data));
         }
 
-        /* look for lsof and give up if its not in PATH */
+         jack_slist_free (driver->capture_ports);
+         driver->capture_ports = 0;
 
-        path = strdup (path);
-        dir = strtok (path, ":");
-        while (dir) {
-                char maybe[PATH_MAX+1];
-                snprintf (maybe, sizeof(maybe), "%s/lsof", dir);
-                if (access (maybe, X_OK)) {
-                        break;
-                }
-                dir = strtok (NULL, ":");
-        }
-        free (path);
+         for (node = driver->playback_ports; node;
+              node = jack_slist_next (node)) {
+                 jack_port_unregister (driver->client,
+                                       ((jack_port_t *) node->data));
+         }
 
-        if (!dir) {
-                return NULL;
-        }
+         jack_slist_free (driver->playback_ports);
+         driver->playback_ports = 0;
 
-        snprintf (command, sizeof (command), "lsof -Fc0 ");
-        cmdlen = strlen (command);
+         if (driver->monitor_ports) {
+                 for (node = driver->monitor_ports; node;
+                      node = jack_slist_next (node)) {
+                         jack_port_unregister (driver->client,
+                                               ((jack_port_t *) node->data));
+                 }
 
-        for (card = 0; card < 8; ++card) {
-                for (device = 0; device < 8; ++device)  {
-                        char buf[32];
-                        
-                        snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dp", card, device);
-                        if (access (buf, F_OK) == 0) {
-                                snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
-                        }
-                        cmdlen = strlen (command);
+                 jack_slist_free (driver->monitor_ports);
+                 driver->monitor_ports = 0;
+         }
 
-                        snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dc", card, device);
-                        if (access (buf, F_OK) == 0) {
-                                snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
-                        }
-                        cmdlen = strlen (command);
-                }
-        }
+         return 0;
+ }
 
-        FILE* f = popen (command, "r");
+ #if 0
+ static int  /* UNUSED */
+ alsa_driver_change_sample_clock (alsa_driver_t *driver, SampleClockMode mode)
 
-        if (!f) {
-                return NULL;
-        }
+ {
+         return driver->hw->change_sample_clock (driver->hw, mode);
+ }
 
-        while (!feof (f)) {
-                char buf[1024]; /* lsof doesn't output much */
+ static void  /* UNUSED */
+ alsa_driver_request_all_monitor_input (alsa_driver_t *driver, int yn)
 
-                if (!fgets (buf, sizeof (buf), f)) {
-                        break;
-                }
+ {
+         if (driver->hw_monitoring) {
+                 if (yn) {
+                         driver->hw->set_input_monitor_mask (driver->hw, ~0U);
+                 } else {
+                         driver->hw->set_input_monitor_mask (
+                                 driver->hw, driver->input_monitor_mask);
+                 }
+         }
 
-                if (*buf != 'p') {
-                        return NULL;
-                }
+         driver->all_monitor_in = yn;
+ }
 
-                /* buf contains NULL as a separator between the process field and the command field */
-                char *pid = buf;
-                ++pid; /* skip leading 'p' */
-                char *cmd = pid;
+ static void  /* UNUSED */
+ alsa_driver_set_hw_monitoring (alsa_driver_t *driver, int yn)
+ {
+         if (yn) {
+                 driver->hw_monitoring = TRUE;
 
-                /* skip to NULL */
-                while (*cmd) {
-                        ++cmd;
-                }
-                ++cmd; /* skip to 'c' */
-                ++cmd; /* skip to first character of command */
+                 if (driver->all_monitor_in) {
+                         driver->hw->set_input_monitor_mask (driver->hw, ~0U);
+                 } else {
+                         driver->hw->set_input_monitor_mask (
+                                 driver->hw, driver->input_monitor_mask);
+                 }
+         } else {
+                 driver->hw_monitoring = FALSE;
+                 driver->hw->set_input_monitor_mask (driver->hw, 0);
+         }
+ }
 
-                snprintf (found+flen, sizeof (found)-flen, "%s (process ID %s)\n", cmd, pid);
-                flen = strlen (found);
+ static ClockSyncStatus  /* UNUSED */
+ alsa_driver_clock_sync_status (channel_t chn)
+ {
+         return Lock;
+ }
+ #endif
 
-                if (flen >= sizeof (found)) {
-                        break;
-                }
-        }
-        
-        pclose (f);
+ static void
+ alsa_driver_delete (alsa_driver_t *driver)
+ {
+         JSList *node;
 
-        if (flen) {
-                return strdup (found);
-        } else {
-                return NULL;
-        }
-}
-        
+ /*
+         if (driver->midi)
+                 (driver->midi->destroy)((jack_driver_t*) driver->midi);
+ */
 
-static jack_driver_t *
-alsa_driver_new (char *name, char *playback_alsa_device,
-		 char *capture_alsa_device,
-		 jack_client_t *client, 
-		 jack_nframes_t frames_per_cycle,
-		 jack_nframes_t user_nperiods,
-		 jack_nframes_t rate,
-		 int hw_monitoring,
-		 int hw_metering,
-		 int capturing,
-		 int playing,
-		 DitherAlgorithm dither,
-		 int soft_mode, 
-		 int monitor,
-		 int user_capture_nchnls,
-		 int user_playback_nchnls,
-		 int shorts_first,
-		 jack_nframes_t capture_latency,
-		 jack_nframes_t playback_latency,
-		 alsa_midi_t *midi_driver
+         for (node = driver->clock_sync_listeners; node;
+              node = jack_slist_next (node)) {
+                 free (node->data);
+         }
+         jack_slist_free (driver->clock_sync_listeners);
+
+         if (driver->ctl_handle) {
+                 snd_ctl_close (driver->ctl_handle);
+                 driver->ctl_handle = 0;
+         } 
+
+         if (driver->capture_handle) {
+                 snd_pcm_close (driver->capture_handle);
+                 driver->capture_handle = 0;
+         } 
+
+         if (driver->playback_handle) {
+                 snd_pcm_close (driver->playback_handle);
+                 driver->capture_handle = 0;
+         }
+
+         if (driver->capture_hw_params) {
+                 snd_pcm_hw_params_free (driver->capture_hw_params);
+                 driver->capture_hw_params = 0;
+         }
+
+         if (driver->playback_hw_params) {
+                 snd_pcm_hw_params_free (driver->playback_hw_params);
+                 driver->playback_hw_params = 0;
+         }
+
+         if (driver->capture_sw_params) {
+                 snd_pcm_sw_params_free (driver->capture_sw_params);
+                 driver->capture_sw_params = 0;
+         }
+
+         if (driver->playback_sw_params) {
+                 snd_pcm_sw_params_free (driver->playback_sw_params);
+                 driver->playback_sw_params = 0;
+         }
+
+         if (driver->pfd) {
+                 free (driver->pfd);
+         }
+
+         if (driver->hw) {
+                 driver->hw->release (driver->hw);
+                 driver->hw = 0;
+         }
+         free(driver->alsa_name_playback);
+         free(driver->alsa_name_capture);
+         free(driver->alsa_driver);
+
+         alsa_driver_release_channel_dependent_memory (driver);
+         jack_driver_nt_finish ((jack_driver_nt_t *) driver);
+         free (driver);
+ }
+
+ static char*
+ discover_alsa_using_apps ()
+ {
+         char found[2048];
+         char command[5192];
+         char* path = getenv ("PATH");
+         char* dir;
+         size_t flen = 0;
+         int card;
+         int device;
+         size_t cmdlen = 0;
+
+         if (!path) {
+                 return NULL;
+         }
+
+         /* look for lsof and give up if its not in PATH */
+
+         path = strdup (path);
+         dir = strtok (path, ":");
+         while (dir) {
+                 char maybe[PATH_MAX+1];
+                 snprintf (maybe, sizeof(maybe), "%s/lsof", dir);
+                 if (access (maybe, X_OK) == 0) {
+                         break;
+                 }
+                 dir = strtok (NULL, ":");
+         }
+         free (path);
+
+         if (!dir) {
+                 return NULL;
+         }
+
+         snprintf (command, sizeof (command), "lsof -Fc0 ");
+         cmdlen = strlen (command);
+
+         for (card = 0; card < 8; ++card) {
+                 for (device = 0; device < 8; ++device)  {
+                         char buf[32];
+
+                         snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dp", card, device);
+                         if (access (buf, F_OK) == 0) {
+                                 snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
+                         }
+                         cmdlen = strlen (command);
+
+                         snprintf (buf, sizeof (buf), "/dev/snd/pcmC%dD%dc", card, device);
+                         if (access (buf, F_OK) == 0) {
+                                 snprintf (command+cmdlen, sizeof(command)-cmdlen, "%s ", buf);
+                         }
+                         cmdlen = strlen (command);
+                 }
+         }
+
+         FILE* f = popen (command, "r");
+
+         if (!f) {
+                 return NULL;
+         }
+
+         while (!feof (f)) {
+                 char buf[1024]; /* lsof doesn't output much */
+
+                 if (!fgets (buf, sizeof (buf), f)) {
+                         break;
+                 }
+
+                 if (*buf != 'p') {
+                         return NULL;
+                 }
+
+                 /* buf contains NULL as a separator between the process field and the command field */
+                 char *pid = buf;
+                 ++pid; /* skip leading 'p' */
+                 char *cmd = pid;
+
+                 /* skip to NULL */
+                 while (*cmd) {
+                         ++cmd;
+                 }
+                 ++cmd; /* skip to 'c' */
+                 ++cmd; /* skip to first character of command */
+
+                 snprintf (found+flen, sizeof (found)-flen, "%s (process ID %s)\n", cmd, pid);
+                 flen = strlen (found);
+
+                 if (flen >= sizeof (found)) {
+                         break;
+                 }
+         }
+
+         pclose (f);
+
+         if (flen) {
+                 return strdup (found);
+         } else {
+                 return NULL;
+         }
+ }
+
+
+ static jack_driver_t *
+ alsa_driver_new (char *name, char *playback_alsa_device,
+                  char *capture_alsa_device,
+                  jack_client_t *client, 
+                  jack_nframes_t frames_per_cycle,
+                  jack_nframes_t user_nperiods,
+                  jack_nframes_t rate,
+                  int hw_monitoring,
+                  int hw_metering,
+                  int capturing,
+                  int playing,
+                  DitherAlgorithm dither,
+                  int soft_mode, 
+                  int monitor,
+                  int user_capture_nchnls,
+                  int user_playback_nchnls,
+                  int shorts_first,
+                  jack_nframes_t capture_latency,
+                  jack_nframes_t playback_latency
 		 )
 {
 	int err;
@@ -2142,7 +2169,7 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 	driver->capture_addr = 0;
 	driver->playback_interleave_skip = NULL;
 	driver->capture_interleave_skip = NULL;
-
+        driver->previously_successfully_configured = FALSE;
 
 	driver->silent = 0;
 	driver->all_monitor_in = FALSE;
@@ -2174,7 +2201,6 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 	driver->alsa_name_playback = strdup (playback_alsa_device);
 	driver->alsa_name_capture = strdup (capture_alsa_device);
 
-	driver->midi = midi_driver;
 	driver->xrun_recovery = 0;
 
 	if (alsa_driver_check_card_type (driver)) {
@@ -2367,7 +2393,9 @@ alsa_driver_new (char *name, char *playback_alsa_device,
 			driver->capture_and_playback_not_synced = TRUE;
 		} 
 	}
-
+        
+        jack_set_latency_callback (client, alsa_driver_latency_callback, driver);
+        
 	driver->client = client;
 
 	return (jack_driver_t *) driver;
@@ -2631,12 +2659,8 @@ driver_get_descriptor ()
 	params[i].character  = 'X';
 	params[i].type       = JackDriverParamString;
 	strcpy (params[i].value.str,  "none");
-	strcpy (params[i].short_desc, "ALSA MIDI driver (seq|raw)");
-	strcpy (params[i].long_desc,
-		"ALSA MIDI driver:\n"
-		" none - no MIDI driver\n"
-		" seq - ALSA Sequencer driver\n"
-		" raw - ALSA RawMIDI driver\n");
+	strcpy (params[i].short_desc, "legacy");
+	strcpy (params[i].long_desc, "legacy option - do not use");
 
 	desc->params = params;
 
@@ -2663,8 +2687,6 @@ driver_initialize (jack_client_t *client, const JSList * params)
 	int shorts_first = FALSE;
 	jack_nframes_t systemic_input_latency = 0;
 	jack_nframes_t systemic_output_latency = 0;
-	char *midi_driver_name = "none";
-	alsa_midi_t *midi = NULL;
 	const JSList * node;
 	const jack_driver_param_t * param;
 
@@ -2754,7 +2776,7 @@ driver_initialize (jack_client_t *client, const JSList * params)
 			break;
 
 		case 'X':
-			midi_driver_name = strdup (param->value.str);
+                        /* ignored, legacy option */
 			break;
 
 		}
@@ -2766,12 +2788,6 @@ driver_initialize (jack_client_t *client, const JSList * params)
 		playback = TRUE;
 	}
 
-	if (strcmp(midi_driver_name, "seq")==0) {
-		midi = alsa_seqmidi_new(client, NULL);
-	} else if (strcmp(midi_driver_name, "raw")==0) {
-		midi = alsa_rawmidi_new(client);
-	}
-
 	return alsa_driver_new ("alsa_pcm", playback_pcm_name,
 				capture_pcm_name, client,
 				frames_per_interrupt, 
@@ -2781,7 +2797,7 @@ driver_initialize (jack_client_t *client, const JSList * params)
 				user_capture_nchnls, user_playback_nchnls,
 				shorts_first, 
 				systemic_input_latency,
-				systemic_output_latency, midi);
+				systemic_output_latency);
 }
 
 void

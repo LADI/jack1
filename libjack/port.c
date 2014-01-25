@@ -24,16 +24,20 @@
 
 #include <config.h>
 #include <sys/mman.h>
+#include <uuid/uuid.h>
 
 #include <jack/jack.h>
 #include <jack/types.h>
-#include <jack/internal.h>
-#include <jack/engine.h>
-#include <jack/pool.h>
-#include <jack/port.h>
 #include <jack/midiport.h>
+#include <jack/uuid.h>
+
 #include <jack/jslist.h>
-#include <jack/intsimd.h>
+
+#include "internal.h"
+#include "engine.h"
+#include "pool.h"
+#include "port.h"
+#include "intsimd.h"
 
 #include "local.h"
 
@@ -65,7 +69,8 @@ jack_port_type_info_t jack_builtin_port_types[] = {
 	  .buffer_scale_factor = 1,
 	},
 	{ .type_name = JACK_DEFAULT_MIDI_TYPE, 
-	  .buffer_scale_factor = 1,
+	  .buffer_scale_factor = -1,
+          .buffer_size = 2048
 	},
 	{ .type_name = "", }
 };
@@ -191,7 +196,7 @@ jack_port_new (const jack_client_t *client, jack_port_id_t port_id,
 	port->connections = 0;
 	port->tied = NULL;
 
-	if (client->control->id == port->shared->client_id) {
+	if (jack_uuid_compare (client->control->uuid, port->shared->client_id) == 0) {
 			
 		/* It's our port, so initialize the pointers to port
 		 * functions within this address space.  These builtin
@@ -268,7 +273,7 @@ jack_port_register (jack_client_t *client,
 		  "%s", port_type);
 	req.x.port_info.flags = flags;
 	req.x.port_info.buffer_size = buffer_size;
-	req.x.port_info.client_id = client->control->id;
+	jack_uuid_copy (&req.x.port_info.client_id, client->control->uuid);
 
 	if (jack_client_deliver_request (client, &req)) {
 		jack_error ("cannot deliver port registration request");
@@ -296,7 +301,7 @@ jack_port_unregister (jack_client_t *client, jack_port_t *port)
 
 	req.type = UnRegisterPort;
 	req.x.port_info.port_id = port->shared->id;
-	req.x.port_info.client_id = client->control->id;
+	jack_uuid_copy (&req.x.port_info.client_id, client->control->uuid);
 
 	return jack_client_deliver_request (client, &req);
 }
@@ -399,7 +404,7 @@ jack_port_get_all_connections (const jack_client_t *client,
 	req.x.port_info.type[0] = '\0';
 	req.x.port_info.flags = 0;
 	req.x.port_info.buffer_size = 0;
-	req.x.port_info.client_id = 0;
+	jack_uuid_clear (&req.x.port_info.client_id);
 	req.x.port_info.port_id = port->shared->id;
 
 	jack_client_deliver_request (client, &req);
@@ -743,6 +748,12 @@ jack_port_name (const jack_port_t *port)
 	return port->shared->name;
 }
 
+jack_uuid_t
+jack_port_uuid (const jack_port_t *port)
+{
+	return port->shared->uuid;
+}
+
 int
 jack_port_get_aliases (const jack_port_t *port, char* const aliases[2])
 {
@@ -774,7 +785,7 @@ jack_port_short_name (const jack_port_t *port)
 int 
 jack_port_is_mine (const jack_client_t *client, const jack_port_t *port)
 {
-	return port->shared->client_id == client->control->id;
+	return jack_uuid_compare (port->shared->client_id, client->control->uuid) == 0;
 }
 
 int
@@ -799,7 +810,7 @@ jack_port_set_name (jack_port_t *port, const char *new_name)
 	len = sizeof (port->shared->name) -
 		((int) (colon - port->shared->name)) - 2;
 	snprintf (colon+1, len, "%s", new_name);
-	
+        
 	return 0;
 }
 

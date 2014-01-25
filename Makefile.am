@@ -13,8 +13,8 @@ dist-check-doxygen:
 	@false
 endif
 
-SUBDIRS =      jack libjack jackd drivers example-clients tools config $(DOC_DIR) man python
-DIST_SUBDIRS = config jack libjack jackd drivers example-clients tools doc man python
+SUBDIRS =      libjack jackd drivers example-clients tools config $(DOC_DIR) man python
+DIST_SUBDIRS = config libjack jackd include drivers example-clients tools doc man python
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = jack.pc
@@ -32,3 +32,23 @@ if HAVE_DBUS
 install-data-hook:
 	@if test "`ps h -C jackdbus`" ; then echo; echo; echo 'WARNING: jackdbus seems to be running, you may want to deactivate current service using "jack_control exit".'; echo; echo; fi
 endif
+
+libjackincludedir = $(includedir)/jack
+
+libjackinclude_HEADERS =   \
+	jack/intclient.h   \
+	jack/jack.h        \
+	jack/ringbuffer.h  \
+	jack/statistics.h  \
+	jack/session.h     \
+	jack/thread.h      \
+	jack/transport.h   \
+	jack/types.h       \
+	jack/midiport.h    \
+	jack/weakmacros.h  \
+	jack/weakjack.h    \
+	jack/control.h     \
+	jack/metadata.h     \
+	jack/uuid.h     \
+	jack/jslist.h
+

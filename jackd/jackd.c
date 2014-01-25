@@ -33,13 +33,17 @@
 #include <dirent.h>
 #include <dlfcn.h>
 
-#include <jack/engine.h>
-#include <jack/internal.h>
-#include <jack/driver.h>
-#include <jack/shm.h>
-#include <jack/driver_parse.h>
-#include <jack/messagebuffer.h>
 #include <jack/midiport.h>
+#include <jack/intclient.h>
+#include <jack/uuid.h>
+
+#include "engine.h"
+#include "internal.h"
+#include "driver.h"
+#include "shm.h"
+#include "driver_parse.h"
+#include "messagebuffer.h"
+#include "clientengine.h"
 
 #ifdef USE_CAPABILITIES
 
@@ -47,7 +51,7 @@
 /* capgetp and capsetp are linux only extensions, not posix */
 #undef _POSIX_SOURCE
 #include <sys/capability.h>
-#include <jack/start.h>
+#include "start.h"
 
 static struct stat pipe_stat;
 
@@ -87,8 +91,153 @@ do_nothing_handler (int sig)
 	write (1, buf, strlen (buf));
 }
 
+static void
+jack_load_internal_clients (JSList* load_list)
+{ 
+	JSList * node;
+
+        for (node = load_list; node; node = jack_slist_next (node)) {
+
+                char* str = (char*) node->data;
+                jack_request_t req;
+                char* colon = strchr (str, ':');
+                char* slash = strchr (str, '/');
+                char* client_name = NULL;
+                char* path = NULL;
+                char* args = NULL;
+                char* rest = NULL;
+                int free_path = 0;
+                int free_name = 0;
+                size_t len;
+
+                /* possible argument forms:
+
+                   client-name:client-type/args
+                   client-type/args
+                   client-name:client-type
+                   client-type
+
+                   client-name is the desired JACK client name.
+                   client-type is basically the name of the DLL/DSO without any suffix.
+                   args is a string whose contents will be passed to the client as
+                   it is instantiated
+                */
+
+                if ((slash == NULL && colon == NULL) || (slash && colon && colon > slash)) {
+
+                        /* client-type */
+
+                        client_name = str;
+                        path = client_name;
+
+                } else if (slash && colon) {
+
+                        /* client-name:client-type/args */
+
+                        len = colon - str;
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                client_name = (char*) malloc (len + 1);
+                                free_name = 1;
+                                memcpy (client_name, str, len);
+                                client_name[len] = '\0';
+                        }
+
+                        len = slash - (colon+1);
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                path = (char*) malloc (len + 1);
+                                free_path = 1;
+                                memcpy (path, colon + 1, len);
+                                path[len] = '\0';
+                        } else {
+                                path = client_name;
+                        }
+                        
+                        rest = slash + 1;
+                        len = strlen (rest);
+                                
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                args = (char*) malloc (len + 1);
+                                memcpy (args, rest, len);
+                                args[len] = '\0';
+                        }
+                        
+                } else if (slash && colon == NULL) {
+
+                        /* client-type/args */
+
+                        len = slash - str;
+
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                path = (char *) malloc (len + 1);
+                                free_path = 1;
+                                memcpy (path, str, len);
+                                path[len] = '\0';
+                        }
+
+                        rest = slash + 1;
+                        len = strlen (rest);
+                                
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                args = (char*) malloc (len + 1);
+                                memcpy (args, rest, len);
+                                args[len] = '\0';
+                        }
+                } else {
+                        
+                        /* client-name:client-type */
+
+                        len = colon - str;
+
+                        if (len) {
+                                /* add 1 to leave space for a NULL */
+                                client_name = (char *) malloc (len + 1);
+                                free_name = 1;
+                                memcpy (client_name, str, len);
+                                client_name[len] = '\0';
+                                path = colon + 1;
+                        }
+                }
+
+                if (client_name == NULL || path == NULL) {
+                        fprintf (stderr, "incorrect format for internal client specification (%s)\n", str);
+                        exit (1);
+                }
+
+                memset (&req, 0, sizeof (req));
+                req.type = IntClientLoad;
+                req.x.intclient.options = 0;
+                strncpy (req.x.intclient.name, client_name, sizeof (req.x.intclient.name));
+                strncpy (req.x.intclient.path, path, sizeof (req.x.intclient.path));
+
+                if (args) {
+                        strncpy (req.x.intclient.init, args, sizeof (req.x.intclient.init));
+                } else {
+                        req.x.intclient.init[0] = '\0';
+                }
+
+                pthread_mutex_lock (&engine->request_lock);
+                jack_intclient_load_request (engine, &req);
+                pthread_mutex_unlock (&engine->request_lock);
+   
+                if (free_name) {
+                        free (client_name);
+                }
+                if (free_path) {
+                        free (path);
+                }
+                if (args) {
+                        free (args);
+                }
+        }
+}
+
 static int
-jack_main (jack_driver_desc_t * driver_desc, JSList * driver_params, JSList * slave_names)
+jack_main (jack_driver_desc_t * driver_desc, JSList * driver_params, JSList * slave_names, JSList * load_list)
 {
 	int sig;
 	int i;
@@ -181,6 +330,8 @@ jack_main (jack_driver_desc_t * driver_desc, JSList * driver_params, JSList * sl
 		jack_error ("cannot start driver");
 		goto error;
 	}
+
+        jack_load_internal_clients (load_list);
 
 	/* install a do-nothing handler because otherwise pthreads
 	   behaviour is undefined when we enter sigwait.
@@ -383,6 +534,7 @@ static void usage (FILE *file)
 "             [ --realtime OR -R [ --realtime-priority OR -P priority ] ]\n"
 "      (the two previous arguments are mutually exclusive. The default is --realtime)\n"
 "             [ --name OR -n server-name ]\n"
+"             [ --load OR -l internal-client ]\n"
 "             [ --no-mlock OR -m ]\n"
 "             [ --unlock OR -u ]\n"
 "             [ --timeout OR -t client-timeout-in-msecs ]\n"
@@ -536,15 +688,23 @@ main (int argc, char *argv[])
 	int do_sanity_checks = 1;
 	int show_version = 0;
 
-	const char *options = "-d:P:uvshVrRZTFlt:mM:n:Np:c:X:C:";
+#ifdef HAVE_ZITA_BRIDGE_DEPS
+	const char *options = "A:d:P:uvshVrRZTFlI:t:mM:n:Np:c:X:C:";
+#else
+	const char *options = "A:d:P:uvshVrRZTFlI:t:mM:n:Np:c:X:C:";
+#endif
 	struct option long_options[] = 
 	{ 
 		/* keep ordered by single-letter option code */
 
+#ifdef HAVE_ZITA_BRIDGE_DEPS
+                { "alsa-add", 1, 0, 'A' },
+#endif
 		{ "clock-source", 1, 0, 'c' },
 		{ "driver", 1, 0, 'd' },
 		{ "help", 0, 0, 'h' },
 		{ "tmpdir-location", 0, 0, 'l' },
+		{ "internal-client", 0, 0, 'I' },
 		{ "no-mlock", 0, 0, 'm' },
 		{ "midi-bufsize", 1, 0, 'M' },
 		{ "name", 1, 0, 'n' },
@@ -573,11 +733,17 @@ main (int argc, char *argv[])
 	char **driver_args = NULL;
 	JSList * driver_params;
 	JSList * slave_drivers = NULL;
+        JSList * load_list = NULL;
 	size_t midi_buffer_size = 0;
 	int driver_nargs = 1;
 	int i;
 	int rc;
-
+#ifdef HAVE_ZITA_BRIDGE_DEPS
+        const char* alsa_add_client_name_playback = "zalsa_out";
+        const char* alsa_add_client_name_capture = "zalsa_in";
+        char alsa_add_args[64];
+        char* dirstr;
+#endif
 	setvbuf (stdout, NULL, _IOLBF, 0);
 
 	maybe_use_capabilities ();
@@ -587,6 +753,40 @@ main (int argc, char *argv[])
 	       (opt = getopt_long (argc, argv, options,
 				   long_options, &option_index)) != EOF) {
 		switch (opt) {
+
+#ifdef HAVE_ZITA_BRIDGE_DEPS
+                case 'A':
+                        /* add a new internal client named after the ALSA device name
+                           given as optarg, using the last character 'p' or 'c' to
+                           indicate playback or capture. If there isn't one,
+                           assume capture (common case: USB mics etc.)
+                        */
+                        if ((dirstr = strstr (optarg, "%p")) != NULL && dirstr == (optarg + strlen(optarg) - 2)) {
+                                snprintf (alsa_add_args, sizeof (alsa_add_args), "%.*s_play:%s/-dhw:%.*s", 
+                                          (int) strlen (optarg) - 2, optarg,
+                                          alsa_add_client_name_playback,
+                                          (int) strlen (optarg) - 2, optarg);
+                                load_list = jack_slist_append(load_list, strdup (alsa_add_args));
+                        } else if ((dirstr = strstr (optarg, "%c")) != NULL && dirstr == (optarg + strlen(optarg) - 2)) {
+                                snprintf (alsa_add_args, sizeof (alsa_add_args), "%.*s_rec:%s/-dhw:%.*s", 
+                                          (int) strlen (optarg) - 2, optarg,
+                                          alsa_add_client_name_capture,
+                                          (int) strlen (optarg) - 2, optarg);
+                                load_list = jack_slist_append(load_list, strdup (alsa_add_args));
+                        } else {
+                                snprintf (alsa_add_args, sizeof (alsa_add_args), "%s_play:%s/-dhw:%s", 
+                                          optarg,
+                                          alsa_add_client_name_playback,
+                                          optarg);
+                                load_list = jack_slist_append(load_list, strdup (alsa_add_args));
+                                snprintf (alsa_add_args, sizeof (alsa_add_args), "%s_rec:%s/-dhw:%s", 
+                                          optarg,
+                                          alsa_add_client_name_capture,
+                                          optarg);
+                                load_list = jack_slist_append(load_list, strdup (alsa_add_args));
+                        }
+                        break;
+#endif
 
 		case 'c':
 			if (tolower (optarg[0]) == 'h') {
@@ -609,7 +809,7 @@ main (int argc, char *argv[])
 			break;
 
 		case 'd':
-			seen_driver = 1;
+			seen_driver = optind + 1;
 			driver_name = optarg;
 			break;
 
@@ -621,6 +821,10 @@ main (int argc, char *argv[])
 			/* special flag to allow libjack to determine jackd's idea of where tmpdir is */
 			printf ("%s\n", jack_tmpdir);
 			exit (0);
+
+                case 'I':
+			load_list = jack_slist_append(load_list, optarg);
+                        break;
 
 		case 'm':
 			do_mlock = 0;
@@ -714,18 +918,34 @@ main (int argc, char *argv[])
 		return -1;
 	}
 
-	if (realtime && (client_timeout >= JACKD_WATCHDOG_TIMEOUT)) {
-		usage (stderr);
-		fprintf (stderr, "In realtime mode (-R) the client timeout must be smaller than the watchdog timeout (%ims).\n", JACKD_WATCHDOG_TIMEOUT);
-		exit (1);
-	}
-
 	if (!seen_driver) {
 		usage (stderr);
 		exit (1);
 	}
 
+        /* DIRTY HACK needed to pick up -X supplied as part of ALSA driver args. This is legacy
+           hack to make control apps like qjackctl based on the < 0.124 command line interface
+           continue to work correctly.
+
+           If -X seq was given as part of the driver args, load the ALSA MIDI slave driver.
+        */
+        
+        for (i = seen_driver; i < argc; ++i) {
+                if (strcmp (argv[i], "-X") == 0) {
+                        if (argc >= i + 2) {
+                                if (strcmp (argv[i+1], "seq") == 0) {
+                                        slave_drivers = jack_slist_append (slave_drivers,"alsa_midi");
+                                }
+                        }
+                        break;
+                } else if (strcmp (argv[i], "-Xseq") == 0) {
+                        slave_drivers = jack_slist_append (slave_drivers,"alsa_midi");
+                        break;
+                }
+        }
+
 	drivers = jack_drivers_load ();
+
 	if (!drivers) {
 		fprintf (stderr, "jackd: no drivers found; exiting\n");
 		exit (1);
@@ -796,7 +1016,7 @@ main (int argc, char *argv[])
 	jack_cleanup_files (server_name);
 
 	/* run the server engine until it terminates */
-	jack_main (desc, driver_params, slave_drivers);
+	jack_main (desc, driver_params, slave_drivers, load_list);
 
 	/* clean up shared memory and files from this server instance */
 	if (verbose)

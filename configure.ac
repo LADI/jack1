@@ -61,8 +61,8 @@ dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
 JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=121
-JACK_MICRO_VERSION=3
+JACK_MINOR_VERSION=124
+JACK_MICRO_VERSION=1
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
@@ -73,7 +73,7 @@ dnl that would break applications statically linked with an older
 dnl version of libjack. NOTE: statically linking to libjack
 dnl is a huge mistake.
 dnl ---
-JACK_PROTOCOL_VERSION=24
+JACK_PROTOCOL_VERSION=25
 
 dnl ---
 dnl HOWTO: updating the libjack interface version
@@ -207,7 +207,9 @@ if test "x$JACK_USE_MACH_THREADS" != "x"; then
 fi
 
 # headers
-AC_CHECK_HEADERS(string.h strings.h alloca.h)
+AC_CHECK_HEADERS(string.h strings.h alloca.h db.h, [],
+     AC_MSG_ERROR([*** a required header file is missing]))
+
 AC_CHECK_HEADERS(getopt.h, [], [
     for d in /Developer/SDKs/MacOSX10.3.0.sdk/usr/include/ ; do
 	AC_CHECK_HEADERS($d/getopt.h, [], [CFLAGS="$CFLAGS -I$d"])
@@ -230,6 +232,8 @@ AC_CHECK_FUNC(pthread_create, [],
 AC_CHECK_FUNCS(on_exit atexit)
 AC_CHECK_FUNCS(posix_memalign)
 AC_CHECK_LIB(m, sin)
+AC_CHECK_LIB(db, db_create,[],
+	 AC_MSG_ERROR([*** JACK requires Berkeley DB libraries (libdb...)]))
 
 echo -n "Checking for ppoll()... "
 AC_EGREP_CPP( ppoll,
@@ -293,7 +297,8 @@ AC_DEFINE_UNQUOTED(JACK_SHM_TYPE, [$JACK_SHM_TYPE],
 AM_CONDITIONAL(USE_POSIX_SHM, $USE_POSIX_SHM)
 
 JACK_CORE_CFLAGS="-I\$(top_srcdir)/config -I\$(top_srcdir) \
--I\$(top_srcdir) -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -Wall"
+-I\$(top_srcdir) -I\$(top_srcdir)/include \ 
+-D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -Wall"
 
 JACK_LIBC_HELPER_FLAGS=
 AC_ARG_ENABLE(ancient_libc,
@@ -371,23 +376,18 @@ if test "build_cpu" = "powerpc" -o "$build_cpu" = "powerpc64" ; then
 
 elif echo $build_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 
-    dnl Check for MMX/SSE assembly
+    dnl Check for SSE usability
     
     if test -r /proc/cpuinfo ; then
 	procflags=`grep '^flags' /proc/cpuinfo`
-	if echo $procflags | grep -s mmx ; then
-	    cpu_supports_mmx=yes
-	fi
 	if echo $procflags | grep -s sse ; then
 	    cpu_supports_sse=yes
 	fi
     else
 	# this is not linux, but assume that if the processor
-	# is x86 then is supports SSE and not MMX
+	# is x86 then is supports SSE
         cpu_supports_sse=yes
 	AC_MSG_WARN([Assuming your x86/x86_64 system can support SSE. Use --disable-sse if this is not the case])
-        cpu_supports_mmx=no
-	AC_MSG_WARN([Assuming your x86/x86_64 system does not need to use MMX. Use --enable-mmx if this is not the case])
     fi
     
     AC_ARG_ENABLE(optimization-by-compiler,
@@ -401,38 +401,10 @@ elif echo $build_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 	optimization_by_cpu=yes
     )
     
-    AC_ARG_ENABLE(mmx,
-	AC_HELP_STRING([--enable-mmx],[enable MMX support (default=auto)]),,
-	enable_mmx=yes)
-    
     AC_ARG_ENABLE(sse,
 	AC_HELP_STRING([--enable-sse],[enable SSE support (default=auto)]),,
-	enable_sse=$enable_mmx)
+	enable_sse=yes)
     
-    if test "x$enable_mmx" = xyes; then
-	
-	AC_MSG_CHECKING(whether we can compile MMX code)
-	
-	AC_COMPILE_IFELSE([asm ("movq 0, %mm0");],
-	    
-	    AC_DEFINE(USE_MMX, 1, [Define to 1 if MMX assembly is available.])
-	    AC_MSG_RESULT(yes)
-	    
-	    if test x$optimization_by_cpu = xyes ; then
-		if test x$cpu_supports_mmx = xyes ; then
-		    MMX_FLAGS="-mmmx"
-		fi
-	    else 
-		MMX_FLAGS="-mmmx"
-	    fi
-	    
-	    AC_MSG_RESULT(yes)
-	    ,
-	    enable_mmx=no
-	    AC_MSG_RESULT(no)
-	    AC_MSG_WARN([The assembler does not support the MMX command set.])
-	)
-    fi
 
     if test "x$enable_sse" = xyes; then
 	
@@ -443,11 +415,9 @@ elif echo $build_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 		if test x$optimization_by_cpu = xyes ; then
 		    if test x$cpu_supports_sse = xyes ; then
 			SSE_FLAGS="-msse -mfpmath=sse"
-			MMX_FLAGS=""
 		    fi
 		else 
 		    SSE_FLAGS="-msse -mfpmath=sse"
-		    MMX_FLAGS=""
 		fi
 		
 		AC_MSG_RESULT(yes)
@@ -470,17 +440,14 @@ dnl a result. oh well.
 dnl     
     
     if test x$with_cpu_target != x ; then
-        JACK_OPT_CFLAGS="-march=$with_cpu_target"
+        JACK_OPT_CFLAGS="-march=$with_cpu_target -mtune=$with_cpu_target"
     else
-        if test "$build_cpu" = "i586"; then
-	   JACK_OPT_CFLAGS="-march=i586 "
-	elif test "$build_cpu" = "i686"; then
-	    JACK_OPT_CFLAGS="-march=i686"
-	elif test "$build_cpu" = "x86_64"; then
-	    JACK_OPT_CFLAGS="-march=k8"
-	else
-	    :
-	fi
+        case ${host_os} in
+	    darwin*) # apple gcc, not GNU
+	             JACK_OPT_CFLAGS="-mtune=generic" ;;
+	          *) # any other gcc
+		     JACK_OPT_CFLAGS="-march=native -mtune=native" ;;
+	esac
     fi
 
 dnl
@@ -489,7 +456,7 @@ dnl to the optimization
 dnl    
 
     if test x$optimization_by_compiler != xyes ; then
-        JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS $JACK_OPT_CFLAGS $MMX_FLAGS $SSE_FLAGS"
+        JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS $JACK_OPT_CFLAGS $SSE_FLAGS"
     else
        JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS"
     fi
@@ -562,15 +529,6 @@ AC_ARG_ENABLE(valgrind-clean,
 	     AC_DEFINE(VALGRIND_CLEAN,,[clean up for valgrind])
           fi
         ]
-)
-
-AC_ARG_ENABLE(ensure-mlock,
-	AC_HELP_STRING([--enable-ensure-mlock], [server should fail if unable to lock memory (default=no)]),
-        [ 
-	  if test x$enable_ensure_mlock != xno ; then
-	  	AC_DEFINE(ENSURE_MLOCK,,[Ensure that memory locking succeeds])
-	  fi
-	]
 )
 
 AC_ARG_ENABLE(debug,
@@ -718,6 +676,44 @@ else
 	NETJACK_LIBS="$NETJACK_LIBS $SAMPLERATE_LIBS"
     	AC_DEFINE(HAVE_SAMPLERATE,1,"Whether libsamplerate is available")
 fi
+
+# if we have Fons Adriensen's zita libs installed, we can build the zita-based
+# internal clients for using additional (ALSA) devices with JACK
+
+HAVE_ZITA_BRIDGE_DEPS=false
+HAVE_ZITA_RESAMPLE=false
+HAVE_ZITA_ALSA_PCMI=false
+        
+case $build_os in
+     linux*)
+      AC_CHECK_LIB(zita-resampler, _Z28zita_resampler_major_versionv,
+            [
+               HAVE_ZITA_RESAMPLE=true
+               AC_MSG_RESULT(yes)
+            ])
+      AC_CHECK_LIB(zita-alsa-pcmi, _Z28zita_alsa_pcmi_major_versionv,
+            [
+               HAVE_ZITA_ALSA_PCMI=true
+               AC_MSG_RESULT(yes)
+            ])
+
+     AC_ARG_ENABLE(zalsa,
+           AC_HELP_STRING([--enable-zalsa],[Build clients using Fons Adriensen\'s Zita libraries for access to multiple devices (default=yes if required libraries are present)]),
+           [
+               if test x$enable_zalsa != xno -a x$HAVE_ZITA_RESAMPLE = xtrue -a x$HAVE_ZITA_ALSA_PCMI = xtrue ; then
+                   AC_DEFINE(HAVE_ZITA_BRIDGE_DEPS,1,"Whether we have the libs needed for Zita ALSA bridge support")
+                   HAVE_ZITA_BRIDGE_DEPS=true
+               fi
+           ],
+           [
+               if test x$HAVE_ZITA_RESAMPLE = xtrue -a x$HAVE_ZITA_ALSA_PCMI = xtrue ; then
+                   AC_DEFINE(HAVE_ZITA_BRIDGE_DEPS,1,"Whether we have the libs needed for Zita ALSA bridge support")
+                   HAVE_ZITA_BRIDGE_DEPS=true
+               fi
+           ]        
+     )
+     ;;
+esac
 
 # Celt low-latency audio codec. netjack transmission via internet.
 HAVE_CELT=false
@@ -965,6 +961,7 @@ AM_CONDITIONAL(HAVE_DOXYGEN, $HAVE_DOXYGEN)
 AM_CONDITIONAL(USE_CAPABILITIES, $USE_CAPABILITIES)
 AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
 AM_CONDITIONAL(HAVE_PPOLL, $HAVE_PPOLL)
+AM_CONDITIONAL(HAVE_ZITA_BRIDGE_DEPS, $HAVE_ZITA_BRIDGE_DEPS)
 
 SETTINGS_PERSISTENCE_WARNING=
 SETTINGS_PERSISTENCE_USE_LIBXML2=false
@@ -1022,8 +1019,7 @@ doc/Makefile
 doc/reference.doxygen
 drivers/Makefile
 drivers/alsa/Makefile
-drivers/alsa-midi/Makefile
-drivers/a2j/Makefile
+drivers/alsa_midi/Makefile
 drivers/dummy/Makefile
 drivers/oss/Makefile
 drivers/sun/Makefile
@@ -1034,13 +1030,14 @@ drivers/firewire/Makefile
 drivers/netjack/Makefile
 example-clients/Makefile
 tools/Makefile
+tools/zalsa/Makefile
 man/Makefile
 jack.pc
 jack.spec
-jack/Makefile
-jack/version.h
 jackd/Makefile
 jackd/jackd.1
+include/version.h
+include/Makefile
 libjack/Makefile
 python/Makefile
 )
@@ -1061,6 +1058,7 @@ echo \| Build with CoreAudio support.......................... : $HAVE_COREAUDIO
 echo \| Build with PortAudio support.......................... : $HAVE_PA
 echo \| Build with Celt support............................... : $HAVE_CELT
 echo \| Build with dynamic buffer size support................ : $buffer_resizing
+echo \| Build with ZITA ALSA bridge support................... : $HAVE_ZITA_BRIDGE_DEPS
 echo \| Compiler optimization flags........................... : $JACK_OPT_CFLAGS
 echo \| Compiler full flags................................... : $CFLAGS
 echo \| Install dir for libjack + backends.................... : $libdir/jack

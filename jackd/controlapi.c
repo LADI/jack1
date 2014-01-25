@@ -28,7 +28,7 @@
 
 #include "config.h"
 
-#include "jack/internal.h"
+#include "internal.h"
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
@@ -36,11 +36,13 @@
 #include <signal.h>
 
 #include "jack/jslist.h"
-#include "jack/driver_interface.h"
-#include "jack/driver.h"
+#include "jack/control.h"
 
-#include "jack/engine.h"
+#include "driver_interface.h"
+#include "driver.h"
+#include "engine.h"
 #include "clientengine.h"
+
 //#include "JackError.h"
 //#include "JackServer.h"
 //#include "shm.h"
@@ -50,8 +52,6 @@
 //#include "JackConstants.h"
 //#include "JackDriverLoader.h"
 //#include "JackServerGlobals.h"
-
-#include "jack/control.h"
 
 /*
  * XXX: dont like statics here.
@@ -1507,7 +1507,6 @@ bool jackctl_server_switch_master(jackctl_server_t * server_ptr, jackctl_driver_
 	    jack_unlock_graph (server_ptr->engine);
 	    pthread_mutex_unlock (&server_ptr->engine->request_lock);
 
-	    jack_stop_watchdog (server_ptr->engine);
 	    server_ptr->engine->driver = NULL;
 
 	    jack_driver_unload (old_driver);

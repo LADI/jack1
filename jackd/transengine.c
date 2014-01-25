@@ -24,9 +24,10 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
-#include <jack/internal.h>
-#include <jack/engine.h>
-#include <jack/messagebuffer.h>
+
+#include "internal.h"
+#include "engine.h"
+#include "messagebuffer.h"
 #include "transengine.h"
 
 /********************** internal functions **********************/
@@ -51,8 +52,7 @@ jack_sync_poll_new (jack_engine_t *engine, jack_client_internal_t *client)
 		VERBOSE (engine, "force transport state to Starting");
 	}
 
-	VERBOSE (engine, "polling sync client %" PRIu32,
-		 client->control->id);
+	VERBOSE (engine, "polling sync client %s", client->control->name);
 }
 
 /* stop polling a specific slow-sync client
@@ -66,8 +66,7 @@ jack_sync_poll_deactivate (jack_engine_t *engine,
 		client->control->sync_poll = 0;
 		client->control->sync_new = 0;
 		engine->control->sync_remain--;
-		VERBOSE (engine, "sync poll interrupted for client %"
-			 PRIu32, client->control->id);
+		VERBOSE (engine, "sync poll interrupted for client %s", client->control->name);
 	}
 	client->control->active_slowsync = 0;
 	engine->control->sync_clients--;
@@ -168,7 +167,7 @@ jack_set_sample_rate (jack_engine_t *engine, jack_nframes_t nframes)
 
 /* on ResetTimeBaseClient request */
 int
-jack_timebase_reset (jack_engine_t *engine, jack_client_id_t client_id)
+jack_timebase_reset (jack_engine_t *engine, jack_uuid_t client_id)
 {
 	int ret;
 	struct _jack_client_internal *client;
@@ -196,7 +195,7 @@ jack_timebase_reset (jack_engine_t *engine, jack_client_id_t client_id)
 /* on SetTimeBaseClient request */
 int
 jack_timebase_set (jack_engine_t *engine,
-		   jack_client_id_t client_id, int conditional)
+		   jack_uuid_t client_id, int conditional)
 {
 	int ret = 0;
 	struct _jack_client_internal *client;
@@ -338,7 +337,7 @@ jack_transport_client_new (jack_client_internal_t *client)
 /* on ResetSyncClient request */
 int
 jack_transport_client_reset_sync (jack_engine_t *engine,
-				  jack_client_id_t client_id)
+				  jack_uuid_t client_id)
 {
 	int ret;
 	jack_client_internal_t *client;
@@ -363,7 +362,7 @@ jack_transport_client_reset_sync (jack_engine_t *engine,
 /* on SetSyncClient request */
 int
 jack_transport_client_set_sync (jack_engine_t *engine,
-				jack_client_id_t client_id)
+				jack_uuid_t client_id)
 {
 	int ret;
 	jack_client_internal_t *client;

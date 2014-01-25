@@ -25,11 +25,11 @@
 #include <assert.h>
 #include <dbus/dbus.h>
 
-#include <jack/internal.h>
+#include "internal.h"
 
 #include "jackdbus.h"
 #include "jackcontroller_internal.h"
-#include "../jack/list.h"
+#include "list.h"
 
 #define JACK_DBUS_IFACE_NAME "org.jackaudio.JackPatchbay"
 

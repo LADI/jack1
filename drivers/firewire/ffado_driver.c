@@ -7,6 +7,7 @@
  *   http://www.jackaudio.org
  *
  *   Copyright (C) 2005-2007 Pieter Palmers
+ *   Copyright (C) 2012 Jonathan Woithe
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -38,8 +39,9 @@
 #include <sys/mman.h>
 
 #include <jack/types.h>
-#include <jack/internal.h>
-#include <jack/engine.h>
+#include "internal.h"
+#include "engine.h"
+#include "libjack/local.h"
 #include <sysdeps/time.h>
 #include <assert.h>
 
@@ -50,10 +52,41 @@
 
 static int ffado_driver_stop (ffado_driver_t *driver);
 
+// Basic functionality requires API version 8.  If version 9 or later
+// is present the buffers can be resized at runtime.
 #define FIREWIRE_REQUIRED_FFADO_API_VERSION 8
+#define FIREWIRE_REQUIRED_FFADO_API_VERSION_FOR_SETBUFSIZE 9
+
+/* FFADO_API_VERSION was first defined with API_VERSION 9, so all previous
+ * headers do not provide this define.
+ */
+#ifndef FFADO_API_VERSION
+extern int ffado_streaming_set_period_size(ffado_device_t *dev,
+		unsigned int period) __attribute__((__weak__));
+#endif
+
 
 // enable verbose messages
 static int g_verbose=0;
+
+static void 
+ffado_latency_callback (jack_latency_callback_mode_t mode, void* arg)
+{
+        ffado_driver_t* driver = (ffado_driver_t*) arg;
+        jack_client_t* client = driver->client;
+        jack_latency_range_t range;
+        JSList* node;
+
+        if (mode == JackPlaybackLatency) {
+                range.min = range.max = (driver->period_size * (driver->device_options.nb_buffers - 1));
+        } else {
+                range.min = range.max = driver->period_size + driver->capture_frame_latency;
+        }
+
+	for (node = client->ports; node; node = jack_slist_next (node)) {
+                jack_port_set_latency_range ((jack_port_t*) node->data, mode, &range);
+	}
+}
 
 static int
 ffado_driver_attach (ffado_driver_t *driver)
@@ -63,7 +96,6 @@ ffado_driver_attach (ffado_driver_t *driver)
 	channel_t chn;
 	jack_port_t *port=NULL;
 	int port_flags;
-	jack_latency_range_t range;
 
 	g_verbose=driver->engine->verbose;
 
@@ -181,8 +213,6 @@ ffado_driver_attach (ffado_driver_t *driver)
 			driver->capture_ports =
 				jack_slist_append (driver->capture_ports, NULL);
 		}
-		range.min = range.max = driver->period_size + driver->capture_frame_latency;
-		jack_port_set_latency_range (port, JackCaptureLatency, &range);
 	}
 	
 	port_flags = JackPortIsInput|JackPortIsPhysical|JackPortIsTerminal;
@@ -247,8 +277,6 @@ ffado_driver_attach (ffado_driver_t *driver)
 			driver->playback_ports =
 				jack_slist_append (driver->playback_ports, NULL);
 		}
-		range.min = range.max = (driver->period_size * (driver->device_options.nb_buffers - 1)) + driver->playback_frame_latency;
-		jack_port_set_latency_range (port, JackPlaybackLatency, &range);
 	}
 
 	if(ffado_streaming_prepare(driver->dev)) {
@@ -671,28 +699,70 @@ ffado_driver_stop (ffado_driver_t *driver)
 	return 0;
 }
 
-
 static int
 ffado_driver_bufsize (ffado_driver_t* driver, jack_nframes_t nframes)
 {
-	printError("Buffer size change requested but not supported!!!");
+	signed int chn;
 
-	/*
-	 driver->period_size = nframes;  
+	// The speed of this function isn't critical; we can afford the
+	// time to check the FFADO API version.
+	if (ffado_get_api_version() < FIREWIRE_REQUIRED_FFADO_API_VERSION_FOR_SETBUFSIZE ||
+            ffado_streaming_set_period_size == NULL) {
+	        printError("unsupported on current version of FFADO; please upgrade FFADO");
+	        return -1;
+	}
+
+	driver->period_size = nframes;
 	driver->period_usecs =
 		(jack_time_t) floor ((((float) nframes) / driver->sample_rate)
 				     * 1000000.0f);
-	*/
-	
+
+	// Reallocate the null and scratch buffers.
+	driver->nullbuffer = calloc(driver->period_size, sizeof(ffado_sample_t));
+	if(driver->nullbuffer == NULL) {
+		printError("could not allocate memory for null buffer");
+		return -1;
+	}
+	driver->scratchbuffer = calloc(driver->period_size, sizeof(ffado_sample_t));
+	if(driver->scratchbuffer == NULL) {
+		printError("could not allocate memory for scratch buffer");
+		return -1;
+	}
+
+	// MIDI buffers need reallocating
+	for (chn = 0; chn < driver->capture_nchannels; chn++) {
+		if(driver->capture_channels[chn].stream_type == ffado_stream_type_midi) {
+			// setup the midi buffer
+			if (driver->capture_channels[chn].midi_buffer != NULL)
+			        free(driver->capture_channels[chn].midi_buffer);
+			driver->capture_channels[chn].midi_buffer = calloc(driver->period_size, sizeof(uint32_t));
+		}
+	}
+	for (chn = 0; chn < driver->playback_nchannels; chn++) {
+		if(driver->playback_channels[chn].stream_type == ffado_stream_type_midi) {
+		        if (driver->playback_channels[chn].midi_buffer != NULL)
+		                free(driver->playback_channels[chn].midi_buffer);
+			driver->playback_channels[chn].midi_buffer = calloc(driver->period_size, sizeof(uint32_t));
+		}
+	}
+
+	// Notify FFADO of the period size change
+	if (ffado_streaming_set_period_size(driver->dev, nframes) != 0) {
+	        printError("could not alter FFADO device period size");
+	        return -1;
+	}
+
+	// This is needed to give the shadow variables a chance to
+	// properly update to the changes.
+	sleep(1);
+
 	/* tell the engine to change its buffer size */
-#if 0
 	if (driver->engine->set_buffer_size (driver->engine, nframes)) {
 		jack_error ("FFADO: cannot set engine buffer size to %d (check MIDI)", nframes);
 		return -1;
 	}
-#endif
 
-	return -1; // unsupported
+        return 0;
 }
 
 typedef void (*JackDriverFinishFunction) (jack_driver_t *);
@@ -704,7 +774,7 @@ ffado_driver_new (jack_client_t * client,
 {
 	ffado_driver_t *driver;
 
-	if(ffado_get_api_version() != FIREWIRE_REQUIRED_FFADO_API_VERSION) {
+	if(ffado_get_api_version() < FIREWIRE_REQUIRED_FFADO_API_VERSION) {
 		printError("Incompatible libffado version! (%s)", ffado_get_version());
 		return NULL;
 	}
@@ -739,6 +809,8 @@ ffado_driver_new (jack_client_t * client,
 
 	driver->client = client;
 	driver->engine = NULL;
+
+        jack_set_latency_callback (client, ffado_latency_callback, driver);
 
 	memset(&driver->device_options,0,sizeof(driver->device_options));	
 	driver->device_options.sample_rate=params->sample_rate;
