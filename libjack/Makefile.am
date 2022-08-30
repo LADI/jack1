@@ -37,7 +37,7 @@ AM_CXXFLAGS = $(JACK_CFLAGS)
 
 libjack_la_CFLAGS = $(AM_CFLAGS)
 
-libjack_la_SOURCES = $(SOURCE_FILES)
+libjack_la_SOURCES =
 libjack_la_LIBADD  = libjackcommon.la simd.lo -ldb @OS_LDFLAGS@ $(DBUS_LIBS)
 libjack_la_LDFLAGS  = -export-dynamic -version-info @JACK_SO_VERSION@
 libjack_la_LIBS = $(DBUS_LIBS)
