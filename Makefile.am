@@ -1,6 +1,8 @@
 MAINTAINERCLEANFILES = Makefile.in aclocal.m4 configure config.h.in \
                        stamp-h.in config.log config.cache config.status
 
+ACLOCAL_AMFLAGS = -I m4
+
 if HAVE_DOXYGEN
 DOC_DIR = doc
 dist-check-doxygen:
@@ -13,8 +15,8 @@ dist-check-doxygen:
 	@false
 endif
 
-SUBDIRS =      libjack jackd drivers example-clients tools config $(DOC_DIR) man python
-DIST_SUBDIRS = config libjack jackd include drivers example-clients tools doc man python
+SUBDIRS =      libjack jackd drivers config $(DOC_DIR) man python
+DIST_SUBDIRS = config libjack jackd include drivers doc man python
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = jack.pc
@@ -36,19 +38,19 @@ endif
 libjackincludedir = $(includedir)/jack
 
 libjackinclude_HEADERS =   \
+	jack/control.h     \
 	jack/intclient.h   \
 	jack/jack.h        \
+	jack/jslist.h      \
+	jack/metadata.h    \
+	jack/midiport.h    \
 	jack/ringbuffer.h  \
-	jack/statistics.h  \
 	jack/session.h     \
+	jack/statistics.h  \
+	jack/systemdeps.h  \
 	jack/thread.h      \
 	jack/transport.h   \
 	jack/types.h       \
-	jack/midiport.h    \
-	jack/weakmacros.h  \
+	jack/uuid.h        \
 	jack/weakjack.h    \
-	jack/control.h     \
-	jack/metadata.h     \
-	jack/uuid.h     \
-	jack/jslist.h
-
+	jack/weakmacros.h

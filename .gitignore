@@ -56,11 +56,7 @@ jackd/jackd
 jackd/jackd.1
 jackd/jackdbus
 jackd/org.jackaudio.service
-man/jack_netsource.1
-man/jack_samplerate.1
-man/jack_wait.1
-man/jack_iodelay.1
-man/jack_load_test.1
+m4
 tags
 tools/alsa_in
 tools/alsa_out
@@ -85,3 +81,4 @@ tools/jack_unload
 tools/jack_wait
 tools/jackrec
 *.pyc
+libjack/.dirstamp

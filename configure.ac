@@ -1,12 +1,23 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl $Id$
 
-AC_INIT(jackd/jackd.c)
+AC_INIT([jack-audio-connection-kit],[0.126.0],
+                [jack-devel@lists.jackaudio.org],[],[http://www.jackaudio.org/])
 
+AC_CONFIG_SRCDIR([jackd/jackd.c])
+
+AC_CONFIG_MACRO_DIR([m4])
+AC_CONFIG_AUX_DIR(config)
+AC_LANG([C])
 
 dnl
 dnl Check for existing JACK installs
-dnl 
+dnl
+
+AC_ARG_ENABLE(force-install,
+	AC_HELP_STRING([--enable-force-install],
+    [force installation when another Jack is found]),
+	[FORCE_INSTALL=$enableval])
 
 AC_MSG_CHECKING([existing, conflicting JACK installs])
 not_overwriting=0
@@ -18,18 +29,18 @@ for dir in /usr/lib /usr/local/lib /opt/lib ; do
 		not_overwriting=$(expr $not_overwriting + 1)
 	    fi
 	    installs="$installs $dir"
-	fi	    
+	fi
     fi
 done
 
-if test $not_overwriting -gt 0 ; then
-    echo 
+if test "x$FORCE_INSTALL" != "xyes" -a $not_overwriting -gt 0 ; then
+    AC_MSG_RESULT(yes)
     echo
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo "You appear to have at least one existing installation of JACK."
     echo
     echo "Complete or partial JACK installs exist in:$installs"
-    echo 
+    echo
     echo "Installing this version will leave at least one of these"
     echo "existing installations installed and this will probably break"
     echo "JACK on your machine. "
@@ -37,16 +48,19 @@ if test $not_overwriting -gt 0 ; then
     echo "Before building, you should first remove the existing JACK"
     echo "installation(s). "
     echo
-    echo "Alternatively use ./configure --prefix=... to force overwriting"
-    echo "the existing install."
+    echo "Alternatively use ./configure --enable-force-install to force"
+    echo "overwriting the existing install."
     echo
     echo "WARNING: ON ANY DEBIAN-DERIVED DISTRIBUTION (Debian, Ubuntu etc)"
     echo "CHANGING THE INSTALLATION PREFIX WILL NOT PRODUCE A WORKING JACK"
     echo "INSTALL. Please contact the distribution packager for JACK and"
     echo "ask them to fix their packaging."
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    exit 1
+    if test "x$FORCE_INSTALL" != "xyes"; then
+        exit 1
+    fi
 fi
+AC_MSG_RESULT(no)
 
 AC_CONFIG_AUX_DIR(config)
 AC_CANONICAL_BUILD
@@ -60,9 +74,17 @@ dnl                 interfaces are changed
 dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
-JACK_MAJOR_VERSION=0
-JACK_MINOR_VERSION=124
-JACK_MICRO_VERSION=1
+
+JACK_MAJOR_VERSION=$(echo $PACKAGE_VERSION | sed "s/\..*//")
+JACK_MINOR_VERSION=$(echo $PACKAGE_VERSION | sed "s/${JACK_MAJOR_VERSION}\.//;s/\..*//")
+JACK_MICRO_VERSION=$(echo $PACKAGE_VERSION | sed "s/.*\.//g")
+
+if test "${JACK_MAJOR_VERSION}.${JACK_MINOR_VERSION}.${JACK_MICRO_VERSION}" != "${PACKAGE_VERSION}" ; then
+	echo "ooops"
+	echo "Found : ${JACK_MAJOR_VERSION}.${JACK_MINOR_VERSION}.${JACK_MICRO_VERSION}"
+	echo "Expected : ${PACKAGE_VERSION}"
+	exit 1
+	fi
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
@@ -78,7 +100,7 @@ JACK_PROTOCOL_VERSION=25
 dnl ---
 dnl HOWTO: updating the libjack interface version
 dnl
-dnl current = incremented whenever the public libjack API is changed 
+dnl current = incremented whenever the public libjack API is changed
 dnl revision = incremented when the libjack implementation is changed
 dnl age = current libjack is both source and binary compatible with
 dnl       libjack interfaces current,current-1,...,current-age
@@ -93,10 +115,6 @@ JACK_API_CURRENT=0
 JACK_API_REVISION=28
 JACK_API_AGE=0
 
-AC_SUBST(JACK_MAJOR_VERSION)
-AC_SUBST(JACK_MINOR_VERSION)
-AC_SUBST(JACK_MICRO_VERSION)
-
 AC_SUBST(JACK_PROTOCOL_VERSION)
 AC_DEFINE_UNQUOTED(PROTOCOL_VERSION, "$JACK_PROTOCOL_VERSION", [Protocol version])
 
@@ -109,16 +127,19 @@ JACK_SO_VERSION=${JACK_API_CURRENT}:${JACK_API_REVISION}:${JACK_API_AGE}
 JACK_VERSION=$JACK_MAJOR_VERSION.$JACK_MINOR_VERSION.${JACK_MICRO_VERSION}${BETA}
 JACK_RELEASE=$JACK_MAJOR_VERSION-$JACK_MINOR_VERSION-${JACK_MICRO_VERSION}${BETA}
 
+
 AC_SUBST(JACK_SO_VERSION)
+dnl JACK_VERSION is needed for doxygen
 AC_SUBST(JACK_VERSION)
 AC_SUBST(JACK_RELEASE)
 
-AM_INIT_AUTOMAKE(jack-audio-connection-kit,${JACK_VERSION})
+AM_INIT_AUTOMAKE
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 dnl
 dnl save any user-provided CFLAGS so we can forget
 dnl about any nonsense that configure generates
-dnl 
+dnl
 
 ORIGINAL_CFLAGS="$CFLAGS"
 
@@ -144,15 +165,18 @@ CFLAGS="$ORIGINAL_CFLAGS"
 AC_MSG_CHECKING([platform dependencies])
 
 HOST_DEFAULT_TMP_DIR=/dev/shm
+USE_MD5SUM=1
 case "${host_os}" in
   freebsd*)
     # current FreeBSD header files conflict with the OSS driver's
     # barrier code, this may be fixed in 5.3, stay tuned.
     USE_BARRIER="no"
+    USE_MD5SUM=0
     ;;
   openbsd*)
     # pthread_barrier* not implemented
     USE_BARRIER="no"
+    USE_MD5SUM=0
     # need small realtime stack
     JACK_THREAD_STACK_TOUCH=10000
     ;;
@@ -168,27 +192,9 @@ case "${host_os}" in
 esac
 
 AC_SUBST(OS_LDFLAGS)
-
-#
-# We need to establish suitable defaults for a 64-bit OS
-libnn=lib
-case "${host_os}" in
-    linux*)
-    case "${host_cpu}" in
-	x86_64|mips64|ppc64|sparc64|s390x)
-        libnn=lib64
-	;;
-    esac
-    ;;
-    solaris*)
-    ## libnn=lib/sparcv9 ## on 64-bit only, but that's compiler-specific
-    ;;  
-esac
-
-## take care not to  override the command-line setting
-if test "${libdir}" = '${exec_prefix}/lib'; then
-  libdir='${exec_prefix}/'${libnn}
-fi
+AC_SUBST(USE_MD5SUM)
+AC_DEFINE_UNQUOTED(USE_MD5SUM,"$USE_MD5SUM",[Using md5sum command line if available])
+AM_CONDITIONAL(USE_MD5SUM, [test $USE_MD5SUM = 1])
 
 # system-dependent config.h values
 test "x$JACK_THREAD_STACK_TOUCH" = "x" && JACK_THREAD_STACK_TOUCH=500000
@@ -207,7 +213,7 @@ if test "x$JACK_USE_MACH_THREADS" != "x"; then
 fi
 
 # headers
-AC_CHECK_HEADERS(string.h strings.h alloca.h db.h, [],
+AC_CHECK_HEADERS(string.h strings.h db.h, [],
      AC_MSG_ERROR([*** a required header file is missing]))
 
 AC_CHECK_HEADERS(getopt.h, [], [
@@ -223,7 +229,7 @@ AC_CHECK_FUNC(getopt_long, [],
 AC_CHECK_FUNC(gethostent, [], AC_CHECK_LIB(nsl, gethostent))
 AC_CHECK_FUNC(setsockopt, [], AC_CHECK_LIB(socket, setsockopt))
 AC_CHECK_FUNC(connect, [], AC_CHECK_LIB(inet, connect))
-AC_CHECK_FUNC(dlopen, [], 
+AC_CHECK_FUNC(dlopen, [],
     AC_CHECK_LIB(dl, dlopen, [],
 	AC_MSG_ERROR([*** JACK requires dynamic load support])))
 AC_CHECK_FUNC(pthread_create, [],
@@ -248,21 +254,35 @@ AC_EGREP_CPP( ppoll,
 	echo "no"
    ] )
 
-	 
 
-AC_CHECK_FUNC(clock_gettime, 
+
+AC_CHECK_FUNC(clock_gettime,
        [
-           AC_DEFINE(HAVE_CLOCK_GETTIME,0,"Whether or not clock_gettime can be found in system libraries")
-       ], 
+           AC_DEFINE(HAVE_CLOCK_GETTIME,1,"Whether or not clock_gettime can be found in system libraries")
+       ],
        #
        # if not found, check librt specifically
        #
-       AC_CHECK_LIB(rt, clock_gettime, 
+       AC_CHECK_LIB(rt, clock_gettime,
            [
-              AC_DEFINE(HAVE_CLOCK_GETTIME,1,"Whether or not clock_gettime can be found in system libraries")
+              AC_DEFINE(HAVE_CLOCK_GETTIME,1,"Whether or not clock_gettime can be found in system libraries (via -lrt)")
 	      OS_LDFLAGS="$OS_LDFLAGS -lrt"
 	   ])
-)	  
+)
+
+AC_CHECK_FUNC(clock_nanosleep,
+       [
+           AC_DEFINE(HAVE_CLOCK_NANOSLEEP,1,"Whether or not clock_nanosleep can be found in system libraries")
+       ],
+       #
+       # if not found, check librt specifically
+       #
+       AC_CHECK_LIB(rt, clock_nanosleep,
+           [
+              AC_DEFINE(HAVE_CLOCK_NANOSLEEP,1,"Whether or not clock_nanosleep can be found in system libraries (via -lrt)")
+	      OS_LDFLAGS="$OS_LDFLAGS -lrt"
+	   ])
+)
 
 # should we use mlockall() on this platform?
 if test "x$JACK_DO_NOT_MLOCK" = "x"; then
@@ -297,7 +317,7 @@ AC_DEFINE_UNQUOTED(JACK_SHM_TYPE, [$JACK_SHM_TYPE],
 AM_CONDITIONAL(USE_POSIX_SHM, $USE_POSIX_SHM)
 
 JACK_CORE_CFLAGS="-I\$(top_srcdir)/config -I\$(top_srcdir) \
--I\$(top_srcdir) -I\$(top_srcdir)/include \ 
+-I\$(top_srcdir)/include -I\$(top_builddir)/include \
 -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -Wall"
 
 JACK_LIBC_HELPER_FLAGS=
@@ -306,13 +326,14 @@ AC_ARG_ENABLE(ancient_libc,
 	JACK_LIBC_HELPER_FLAGS="-D_XOPEN_SOURCE=600 -D_BSD_SOURCE",
 	JACK_LIBC_HELPER_FLAGS=""
 	)
-	 
-JACK_CORE_CFLAGS="$JACK_CORE_CFLAGS $JACK_LIBC_HELPER_FLAGS"   
+
+JACK_CORE_CFLAGS="$JACK_CORE_CFLAGS $JACK_LIBC_HELPER_FLAGS"
 
 case $build_os in
-     # we need weak linkage which appeared in 10.2, but lets ask for 10.4 anyway
-     darwin*) JACK_CORE_CFLAGS="$JACK_CORE_CFLAGS -mmacosx-version-min=10.4" ;;
-esac    
+     # we need weak linkage which appeared in 10.2, but for compatibility with
+     # macOS 10.14 and above we cannot set a minimum version below 10.6 here.
+     darwin*) JACK_CORE_CFLAGS="$JACK_CORE_CFLAGS -mmacosx-version-min=10.6" ;;
+esac
 
 AC_ARG_WITH(cpu-target,
             [  --with-cpu-target=cpu-type    explicit, overriding argument for gcc -march= flag])
@@ -340,7 +361,7 @@ fi
 if test "build_cpu" = "powerpc" -o "$build_cpu" = "powerpc64" ; then
 
     AC_DEFINE(POWERPC, 1, "Are we running a ppc CPU?")
-    
+
 ############################
 # Check for Altivec assembly
 ############################
@@ -348,12 +369,12 @@ if test "build_cpu" = "powerpc" -o "$build_cpu" = "powerpc64" ; then
     AC_ARG_ENABLE(altivec,
 	AC_HELP_STRING([--enable-altivec],[enable Altivec support (default=auto)]),,
 	[ enable_altivec=yes ])
-    
+
     if test "x$enable_altivec" = xyes; then
-	
+
 	AC_MSG_CHECKING(whether we can compile Altivec code)
-	
-	AC_COMPILE_IFELSE([asm ("vand %v0, %v0, %v0");],
+
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE([asm ("vand %v0, %v0, %v0");])],
 	    AC_DEFINE(USE_ALTIVEC, 1, [Define to 1 if Altivec assembly is available.])
 	    AC_DEFINE(HAVE_ALTIVEC_LINUX, 1, "Is there Altivec Support ?")
 	    ALTIVEC_OPT_FLAGS="-maltivec -mabi=altivec"
@@ -363,21 +384,21 @@ if test "build_cpu" = "powerpc" -o "$build_cpu" = "powerpc64" ; then
 	    AC_MSG_RESULT(no)
 	    AC_MSG_WARN([The assembler does not support the Altivec command set.])
 	)
-	
+
     fi
 
     dnl -mcpu=7450 does not reliably work with gcc 3.*
-    
+
     JACK_OPT_CFLAGS="-O2 -mcpu=7400 $ALTIVEC_OPT_FLAGS -mhard-float -mpowerpc-gfxopt"
 
     if test "$build_cpu" = "powerpc64"; then
-	JACK_OPT_CFLAGS="-O2 -mcpu=powerpc64 $ALTIVEC_OPT_FLAGS -mhard-float" 
+	JACK_OPT_CFLAGS="-O2 -mcpu=powerpc64 $ALTIVEC_OPT_FLAGS -mhard-float"
     fi
 
 elif echo $build_cpu | egrep '(i.86|x86_64)' >/dev/null; then
 
     dnl Check for SSE usability
-    
+
     if test -r /proc/cpuinfo ; then
 	procflags=`grep '^flags' /proc/cpuinfo`
 	if echo $procflags | grep -s sse ; then
@@ -389,56 +410,56 @@ elif echo $build_cpu | egrep '(i.86|x86_64)' >/dev/null; then
         cpu_supports_sse=yes
 	AC_MSG_WARN([Assuming your x86/x86_64 system can support SSE. Use --disable-sse if this is not the case])
     fi
-    
+
     AC_ARG_ENABLE(optimization-by-compiler,
 	AC_HELP_STRING([--enable-optimization-by-compiler],[use compiler (NOT processor) capabilities to determine optimization flags (default=no)]),
 	optimization_by_compiler=yes,
 	optimization_by_compiler=no
     )
-    
+
     AC_ARG_ENABLE(optimization-by-cpu,
 	AC_HELP_STRING([--enable-optimization-by-cpu],[use processor capabilities to determine optimization flags (default=yes)]),,
 	optimization_by_cpu=yes
     )
-    
+
     AC_ARG_ENABLE(sse,
 	AC_HELP_STRING([--enable-sse],[enable SSE support (default=auto)]),,
 	enable_sse=yes)
-    
+
 
     if test "x$enable_sse" = xyes; then
-	
+
 	AC_MSG_CHECKING(whether we can compile SSE code)
-	
-	AC_COMPILE_IFELSE([asm ("movntps %xmm0, 0");],
+
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE([asm ("movntps %xmm0, 0");])],
 	    [
 		if test x$optimization_by_cpu = xyes ; then
 		    if test x$cpu_supports_sse = xyes ; then
 			SSE_FLAGS="-msse -mfpmath=sse"
 		    fi
-		else 
+		else
 		    SSE_FLAGS="-msse -mfpmath=sse"
 		fi
-		
+
 		AC_MSG_RESULT(yes)
 		],
 	    [
 		enable_sse=no
 		AC_MSG_RESULT(no)
-		AC_MSG_WARN([The assembler does not support the SSE command set.]) 
+		AC_MSG_WARN([The assembler does not support the SSE command set.])
 		])
     fi
-    
+
     AC_DEFINE(x86, 1, "Nope it's intel")
     COMMON_X86_OPT_FLAGS="-O3 -fomit-frame-pointer -ffast-math -funroll-loops"
 
 dnl
-dnl its a little sad that OS X doesn't make it possible to identify 
+dnl its a little sad that OS X doesn't make it possible to identify
 dnl the build_cpu a little more precisely. on os x we always get "i386"
-dnl as the CPU type. we miss out on some possible optimizations as 
+dnl as the CPU type. we miss out on some possible optimizations as
 dnl a result. oh well.
-dnl     
-    
+dnl
+
     if test x$with_cpu_target != x ; then
         JACK_OPT_CFLAGS="-march=$with_cpu_target -mtune=$with_cpu_target"
     else
@@ -453,7 +474,7 @@ dnl
 dnl
 dnl do not add h/w specific flags if asked to let compiler
 dnl to the optimization
-dnl    
+dnl
 
     if test x$optimization_by_compiler != xyes ; then
         JACK_OPT_CFLAGS="$COMMON_X86_OPT_FLAGS $JACK_OPT_CFLAGS $SSE_FLAGS"
@@ -483,7 +504,7 @@ AC_ARG_ENABLE(optimize,
         # no optimization, so lets get debugging symbols instead
 	JACK_OPT_CFLAGS="-g"
 	AC_MSG_WARN([no optimization.........................])
-      fi 
+      fi
     ],
     [
         # no optimization, so lets get debugging symbols instead
@@ -503,7 +524,7 @@ AC_SUBST(JACK_CORE_CFLAGS)
 
 dnl
 dnl use JACK_CFLAGS for jackd compilation
-dnl 
+dnl
 
 CFLAGS="$CFLAGS $JACK_CFLAGS"
 
@@ -511,20 +532,20 @@ CFLAGS="$CFLAGS $JACK_CFLAGS"
 buffer_resizing=yes
 AC_ARG_ENABLE(resize,
 	AC_HELP_STRING([--enable-resize], [enable buffer resizing feature (default=yes)]),
-        [ 
+        [
 	  if test x$enable_resize = xno ; then
 	  	buffer_resizing=no
 	  fi
 	 ]
 )
 
-if test x$buffer_resizing != xno; then 
+if test x$buffer_resizing != xno; then
    AC_DEFINE(DO_BUFFER_RESIZE,,[Enable buffer resizing])
 fi
 
 AC_ARG_ENABLE(valgrind-clean,
 	AC_HELP_STRING([--enable-valgrind-clean],[spend a few extra CPU cycles avoiding unnecessary valgrind warnings (default=no)]),
-        [ 
+        [
 	  if test x$enable_valgrind_clean != xno ; then
 	     AC_DEFINE(VALGRIND_CLEAN,,[clean up for valgrind])
           fi
@@ -534,7 +555,7 @@ AC_ARG_ENABLE(valgrind-clean,
 AC_ARG_ENABLE(debug,
 	AC_HELP_STRING([--enable-debug],
 		[enable debugging messages in jackd and libjack (default=no)]),
-        [ 
+        [
 	  if test x$enable_debug != xno ; then
 	     AC_DEFINE(DEBUG_ENABLED,,[Enable debugging messages])
           fi
@@ -544,11 +565,11 @@ AC_ARG_ENABLE(debug,
 AC_ARG_ENABLE(timestamps,
 	AC_HELP_STRING([--enable-timestamps],
 		[allow clients to use the JACK timestamp API (JACK developers only) (default=no)]),
-        [ 
+        [
 	  if test x$enable_timestamps != xno ; then
 	  	AC_DEFINE(WITH_TIMESTAMPS,,[Enable JACK timestamp API])
           fi
-        ]		
+        ]
 )
 
 AC_ARG_ENABLE(preemption-check,
@@ -596,7 +617,7 @@ AC_ARG_ENABLE(oldtrans,
 	AC_HELP_STRING([--disable-oldtrans],[remove old transport interfaces (default=yes)]),
               [ if test "x$enable_oldtrans" = "xno" ; then
 		    with_oldtrans=no
-		fi 
+		fi
 	      ]
 )
 if test "x$with_oldtrans" != "xno" ; then
@@ -606,12 +627,12 @@ fi
 STRIPPED_JACKD=false
 AC_ARG_ENABLE(stripped-jackd,
 	AC_HELP_STRING([--enable-stripped-jackd],[strip jack before computing its md5 sum (useful only with Linux 2.4 kernel)]),
-              [ if test "x$USE_CAPABILITIES" != "xtrue" ; then	    
+              [ if test "x$USE_CAPABILITIES" != "xtrue" ; then
                     AC_MSG_WARN([*** capabilities not enabled, stripped jackd has no effect])
                 elif test "x$enable_stripped_jackd" != "xno"; then
-                    STRIPPED_JACKD=true		    
-                fi  
-              ]	
+                    STRIPPED_JACKD=true
+                fi
+              ]
 )
 
 # plugins go in the addon dir.
@@ -658,13 +679,6 @@ if test "x$USE_BARRIER" = "xyes"; then
 		AC_DEFINE(USE_BARRIER, 1, [Use pthread barrier functions]))
 fi
 
-# some example-clients need libsndfile
-HAVE_SNDFILE=false
-PKG_CHECK_MODULES(SNDFILE, sndfile >= 1.0,[HAVE_SNDFILE=true], [true])
-if test x$HAVE_SNDFILE = xfalse; then
-             AC_MSG_WARN([*** the jackrec example client will not be built])
-fi
-
 # NetJack backend and internal client need libsamplerate
 HAVE_SAMPLERATE=false
 PKG_CHECK_MODULES(SAMPLERATE, samplerate >= 0.1.2,[HAVE_SAMPLERATE=true], [true])
@@ -676,44 +690,6 @@ else
 	NETJACK_LIBS="$NETJACK_LIBS $SAMPLERATE_LIBS"
     	AC_DEFINE(HAVE_SAMPLERATE,1,"Whether libsamplerate is available")
 fi
-
-# if we have Fons Adriensen's zita libs installed, we can build the zita-based
-# internal clients for using additional (ALSA) devices with JACK
-
-HAVE_ZITA_BRIDGE_DEPS=false
-HAVE_ZITA_RESAMPLE=false
-HAVE_ZITA_ALSA_PCMI=false
-        
-case $build_os in
-     linux*)
-      AC_CHECK_LIB(zita-resampler, _Z28zita_resampler_major_versionv,
-            [
-               HAVE_ZITA_RESAMPLE=true
-               AC_MSG_RESULT(yes)
-            ])
-      AC_CHECK_LIB(zita-alsa-pcmi, _Z28zita_alsa_pcmi_major_versionv,
-            [
-               HAVE_ZITA_ALSA_PCMI=true
-               AC_MSG_RESULT(yes)
-            ])
-
-     AC_ARG_ENABLE(zalsa,
-           AC_HELP_STRING([--enable-zalsa],[Build clients using Fons Adriensen\'s Zita libraries for access to multiple devices (default=yes if required libraries are present)]),
-           [
-               if test x$enable_zalsa != xno -a x$HAVE_ZITA_RESAMPLE = xtrue -a x$HAVE_ZITA_ALSA_PCMI = xtrue ; then
-                   AC_DEFINE(HAVE_ZITA_BRIDGE_DEPS,1,"Whether we have the libs needed for Zita ALSA bridge support")
-                   HAVE_ZITA_BRIDGE_DEPS=true
-               fi
-           ],
-           [
-               if test x$HAVE_ZITA_RESAMPLE = xtrue -a x$HAVE_ZITA_ALSA_PCMI = xtrue ; then
-                   AC_DEFINE(HAVE_ZITA_BRIDGE_DEPS,1,"Whether we have the libs needed for Zita ALSA bridge support")
-                   HAVE_ZITA_BRIDGE_DEPS=true
-               fi
-           ]        
-     )
-     ;;
-esac
 
 # Celt low-latency audio codec. netjack transmission via internet.
 HAVE_CELT=false
@@ -798,7 +774,7 @@ AC_CHECK_LIB(expat, XML_ParserCreate_MM,
 
 # Check which backend drivers can be built.  The last one successfully
 # configured becomes the default JACK driver; so the order of
-# precedence is: alsa, sun, oss, coreaudio, portaudio, dummy.
+# precedence is: alsa, sun, oss, coreaudio, portaudio, sndio, dummy.
 
 JACK_DEFAULT_DRIVER=\"dummy\"
 
@@ -835,7 +811,7 @@ fi
 AM_CONDITIONAL(HAVE_COREAUDIO, $HAVE_COREAUDIO)
 
 AC_ARG_ENABLE(oss, AC_HELP_STRING([--disable-oss],[ignore OSS driver ]),
-			TRY_OSS=$enableval , TRY_OSS=yes ) 
+			TRY_OSS=$enableval , TRY_OSS=yes )
 HAVE_OSS="false"
 if test "x$TRY_OSS" = "xyes"
 then
@@ -847,7 +823,7 @@ fi
 AM_CONDITIONAL(HAVE_OSS, $HAVE_OSS)
 
 AC_ARG_ENABLE(sun, AC_HELP_STRING([--disable-sun],[ignore Sun driver ]),
-			TRY_SUN=$enableval , TRY_SUN=yes ) 
+			TRY_SUN=$enableval , TRY_SUN=yes )
 HAVE_SUN="false"
 if test "x$TRY_SUN" = "xyes"
 then
@@ -858,8 +834,22 @@ then
 fi
 AM_CONDITIONAL(HAVE_SUN, $HAVE_SUN)
 
+AC_ARG_ENABLE(sndio, AC_HELP_STRING([--disable-sndio],[ignore sndio driver ]),
+			TRY_SNDIO=$enableval , TRY_SNDIO=yes ) 
+HAVE_SNDIO="false"
+if test "x$TRY_SNDIO" = "xyes"
+then
+	# check for sndio audio API
+	AC_CHECK_HEADER([sndio.h],
+	     [HAVE_SNDIO="true"
+              JACK_DEFAULT_DRIVER=\"sndio\"])
+	SNDIO_LIBS="-lsndio"
+	AC_SUBST([SNDIO_LIBS])
+fi
+AM_CONDITIONAL(HAVE_SNDIO, $HAVE_SNDIO)
+
 AC_ARG_ENABLE(freebob, AC_HELP_STRING([--disable-freebob],[ignore FreeBob driver ]),
-			TRY_FREEBOB=$enableval , TRY_FREEBOB=yes ) 
+			TRY_FREEBOB=$enableval , TRY_FREEBOB=yes )
 HAVE_FREEBOB="false"
 if test "x$TRY_FREEBOB" = "xyes"
 then
@@ -876,7 +866,7 @@ fi
 AM_CONDITIONAL(HAVE_FREEBOB,$HAVE_FREEBOB)
 
 AC_ARG_ENABLE(firewire, AC_HELP_STRING([--disable-firewire],[ignore FireWire driver (FFADO)]),
-			TRY_FIREWIRE=$enableval , TRY_FIREWIRE=yes ) 
+			TRY_FIREWIRE=$enableval , TRY_FIREWIRE=yes )
 HAVE_FIREWIRE="false"
 if test "x$TRY_FIREWIRE" = "xyes"
 then
@@ -893,7 +883,7 @@ fi
 AM_CONDITIONAL(HAVE_FIREWIRE,$HAVE_FIREWIRE)
 
 AC_ARG_ENABLE(alsa, AC_HELP_STRING([--disable-alsa],[ignore ALSA driver ]),
-			TRY_ALSA=$enableval , TRY_ALSA=yes ) 
+			TRY_ALSA=$enableval , TRY_ALSA=yes )
 HAVE_ALSA="false"
 if test "x$TRY_ALSA" = "xyes"
 then
@@ -924,44 +914,18 @@ AC_DEFINE_UNQUOTED(JACK_SEMAPHORE_KEY,
 	  [ an integer constant used as the semaphore and SysV SHM key. see libjack/shm.c for usage])
 AC_SUBST(JACK_SEMAPHORE_KEY)
 
-# On some systems, readline depends on termcap or ncurses.  But, the
-# MacOSX linker complains bitterly if these libraries are explicitly
-# referenced.  
-#
-# AC_CHECK_LIB() foolishly assumes that checking a library for an entry
-# point always returns the same result regardless of any dependent
-# libraries specified.  The `unset ac_cv_lib_readline_readline' erases
-# the cached result to work around this problem.
-READLINE_DEPS=""
-HAVE_READLINE=true
-AC_CHECK_LIB(readline, readline, [:],
-    [unset ac_cv_lib_readline_readline
-     AC_CHECK_LIB(readline, readline, [READLINE_DEPS="-ltermcap"],
-        [unset ac_cv_lib_readline_readline
-	 AC_CHECK_LIB(readline, readline,
-	    [READLINE_DEPS="-lncurses"], [HAVE_READLINE=false], "-lncurses")],
-	"-ltermcap")])
-AC_CHECK_HEADER(readline/chardefs.h, [], [HAVE_READLINE=false])
-if test x$HAVE_READLINE = xfalse; then
-	AC_MSG_WARN([*** the jack_transport example client will not be built])
-fi
-AC_SUBST(READLINE_DEPS)
-
 # you need doxygen to make dist.
 AC_CHECK_PROG(HAVE_DOXYGEN, doxygen, true, false)
 if test $HAVE_DOXYGEN = "false"; then
              AC_MSG_WARN([*** doxygen not found, docs will not be built])
 fi
 
-AM_CONDITIONAL(HAVE_SNDFILE, $HAVE_SNDFILE)
 AM_CONDITIONAL(HAVE_CELT, $HAVE_CELT)
 AM_CONDITIONAL(HAVE_SAMPLERATE, $HAVE_SAMPLERATE)
-AM_CONDITIONAL(HAVE_READLINE, $HAVE_READLINE)
 AM_CONDITIONAL(HAVE_DOXYGEN, $HAVE_DOXYGEN)
 AM_CONDITIONAL(USE_CAPABILITIES, $USE_CAPABILITIES)
 AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
 AM_CONDITIONAL(HAVE_PPOLL, $HAVE_PPOLL)
-AM_CONDITIONAL(HAVE_ZITA_BRIDGE_DEPS, $HAVE_ZITA_BRIDGE_DEPS)
 
 SETTINGS_PERSISTENCE_WARNING=
 SETTINGS_PERSISTENCE_USE_LIBXML2=false
@@ -999,17 +963,6 @@ AM_CONDITIONAL(SETTINGS_PERSISTENCE_DISABLED, $SETTINGS_PERSISTENCE_DISABLED)
 AC_OUTPUT(
 Makefile
 config/Makefile
-config/cpu/Makefile
-config/cpu/alpha/Makefile
-config/cpu/cris/Makefile
-config/cpu/generic/Makefile
-config/cpu/i386/Makefile
-config/cpu/i486/Makefile
-config/cpu/ia64/Makefile
-config/cpu/m68k/Makefile
-config/cpu/mips/Makefile
-config/cpu/powerpc/Makefile
-config/cpu/s390/Makefile
 config/os/Makefile
 config/os/generic/Makefile
 config/os/gnu-linux/Makefile
@@ -1023,14 +976,12 @@ drivers/alsa_midi/Makefile
 drivers/dummy/Makefile
 drivers/oss/Makefile
 drivers/sun/Makefile
+drivers/sndio/Makefile
 drivers/portaudio/Makefile
 drivers/coreaudio/Makefile
 drivers/freebob/Makefile
 drivers/firewire/Makefile
 drivers/netjack/Makefile
-example-clients/Makefile
-tools/Makefile
-tools/zalsa/Makefile
 man/Makefile
 jack.pc
 jack.spec
@@ -1047,18 +998,18 @@ dnl Output summary message
 dnl
 
 echo
-echo $PACKAGE $VERSION :
+echo $PACKAGE_NAME $PACKAGE_VERSION :
 echo
 echo \| Build with ALSA support............................... : $HAVE_ALSA
 echo \| Build with old FireWire \(FreeBob\) support............. : $HAVE_FREEBOB
 echo \| Build with new FireWire \(FFADO\) support............... : $HAVE_FIREWIRE
 echo \| Build with OSS support................................ : $HAVE_OSS
 echo \| Build with Sun audio support.......................... : $HAVE_SUN
+echo \| Build with Sndio audio support........................ : $HAVE_SNDIO
 echo \| Build with CoreAudio support.......................... : $HAVE_COREAUDIO
 echo \| Build with PortAudio support.......................... : $HAVE_PA
 echo \| Build with Celt support............................... : $HAVE_CELT
 echo \| Build with dynamic buffer size support................ : $buffer_resizing
-echo \| Build with ZITA ALSA bridge support................... : $HAVE_ZITA_BRIDGE_DEPS
 echo \| Compiler optimization flags........................... : $JACK_OPT_CFLAGS
 echo \| Compiler full flags................................... : $CFLAGS
 echo \| Install dir for libjack + backends.................... : $libdir/jack
@@ -1091,3 +1042,4 @@ if test "$SETTINGS_PERSISTENCE_WARNING"
 then
 	AC_MSG_WARN($SETTINGS_PERSISTENCE_WARNING)
 fi
+

@@ -18,20 +18,21 @@
 
     Grame Research Laboratory, 9, rue du Garet 69001 Lyon - France
     grame@rd.grame.fr
-	
-	Johnny Petrantoni, johnny@lato-b.com - Italy, Rome.
-    
-	30-01-04, Johnny Petrantoni: first code of the coreaudio driver.
-   
-*/
+
+        Johnny Petrantoni, johnny@lato-b.com - Italy, Rome.
+
+        30-01-04, Johnny Petrantoni: first code of the coreaudio driver.
+
+ */
 
 #ifndef __jack_coreaudio_driver_h__
 #define __jack_coreaudio_driver_h__
 
 #include <CoreAudio/CoreAudio.h>
+#if !defined(MAC_OS_X_VERSION_10_6) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
 #include <AudioToolbox/AudioConverter.h>
+#endif
 #include <AudioUnit/AudioUnit.h>
-
 #include <jack/jack.h>
 #include <jack/types.h>
 
@@ -41,32 +42,32 @@
 
 typedef struct {
 
-    JACK_DRIVER_DECL struct _jack_engine *engine;
+	JACK_DRIVER_DECL struct _jack_engine *engine;
 
-    jack_nframes_t frame_rate;
-    jack_nframes_t frames_per_cycle;
-    unsigned long user_nperiods;
-    int capturing;
-    int playing;
+	jack_nframes_t frame_rate;
+	jack_nframes_t frames_per_cycle;
+	unsigned long user_nperiods;
+	int capturing;
+	int playing;
 
-    channel_t playback_nchannels;
-    channel_t capture_nchannels;
+	channel_t playback_nchannels;
+	channel_t capture_nchannels;
 
-    jack_client_t *client;
-    JSList *capture_ports;
-    JSList *playback_ports;
+	jack_client_t *client;
+	JSList *capture_ports;
+	JSList *playback_ports;
 
 	char capture_driver_name[256];
 	char playback_driver_name[256];
- 	
+
 	AudioUnit au_hal;
 	AudioBufferList* input_list;
 	AudioDeviceID device_id;
 	int state;
-	
+
 	jack_nframes_t capture_frame_latency;
 	jack_nframes_t playback_frame_latency;
-	
+
 	int xrun_detected;
 	int null_cycle_occured;
 
@@ -74,10 +75,10 @@ typedef struct {
 
 #define kVersion 01
 
-typedef	UInt8	CAAudioHardwareDeviceSectionID;
-#define	kAudioDeviceSectionInput	((CAAudioHardwareDeviceSectionID)0x01)
-#define	kAudioDeviceSectionOutput	((CAAudioHardwareDeviceSectionID)0x00)
-#define	kAudioDeviceSectionGlobal	((CAAudioHardwareDeviceSectionID)0x00)
-#define	kAudioDeviceSectionWildcard	((CAAudioHardwareDeviceSectionID)0xFF)
+typedef UInt8 CAAudioHardwareDeviceSectionID;
+#define kAudioDeviceSectionInput        ((CAAudioHardwareDeviceSectionID)0x01)
+#define kAudioDeviceSectionOutput       ((CAAudioHardwareDeviceSectionID)0x00)
+#define kAudioDeviceSectionGlobal       ((CAAudioHardwareDeviceSectionID)0x00)
+#define kAudioDeviceSectionWildcard     ((CAAudioHardwareDeviceSectionID)0xFF)
 
 #endif /* __jack_coreaudio_driver_h__ */
