@@ -4708,7 +4708,7 @@ jack_port_rename_notify (jack_engine_t *engine,
 
 	if (engine->jackctl_port_registration_notify != NULL)
 	{
-		engine->jackctl_port_registration_notify(engine->jackctl_context, port_id, yn);
+//		engine->jackctl_port_registration_notify(engine->jackctl_context, port_id, yn);
 	}
 }
 
