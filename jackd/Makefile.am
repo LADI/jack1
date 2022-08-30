@@ -33,7 +33,7 @@ COMMON_SOURCES = engine.c clientengine.c transengine.c
 COMMON_LIBS = libjackserver.la $(CAP_LIBS) @OS_LDFLAGS@
 
 jackd_SOURCES = jackd.c $(COMMON_SOURCES)
-jackd_LDADD = $(COMMON_LIBS)
+jackd_LDADD = $(COMMON_LIBS) $(DBUS_LIBS)
 
 noinst_HEADERS = jack_md5.h md5.h md5_loc.h \
 		 clientengine.h transengine.h

@@ -73,7 +73,10 @@
 #endif
 
 #if HAVE_DBUS
+//#pragma warning("client: jackdbus enabled")
 #include <dbus/dbus.h>
+#else
+//#pragma warning("client: jackdbus disabled")
 #endif
 
 static pthread_mutex_t client_lock;
