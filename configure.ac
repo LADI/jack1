@@ -1042,7 +1042,6 @@ jack/version.h
 jackd/Makefile
 jackd/jackd.1
 libjack/Makefile
-python/Makefile
 )
 
 dnl

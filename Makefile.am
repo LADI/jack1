@@ -13,8 +13,8 @@ dist-check-doxygen:
 	@false
 endif
 
-SUBDIRS =      jack libjack jackd drivers example-clients tools config $(DOC_DIR) man python
-DIST_SUBDIRS = config jack libjack jackd drivers example-clients tools doc man python
+SUBDIRS =      jack libjack jackd drivers example-clients tools config $(DOC_DIR) man
+DIST_SUBDIRS = config jack libjack jackd drivers example-clients tools doc man
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = jack.pc
