@@ -60,9 +60,9 @@ dnl                 interfaces are changed
 dnl micro version = incremented when implementation-only
 dnl                 changes are made
 dnl ---
-JACK_MAJOR_VERSION=0
+JACK_MAJOR_VERSION=1
 JACK_MINOR_VERSION=121
-JACK_MICRO_VERSION=3
+JACK_MICRO_VERSION=4
 
 dnl ---
 dnl HOWTO: updating the jack protocol version
@@ -113,7 +113,7 @@ AC_SUBST(JACK_SO_VERSION)
 AC_SUBST(JACK_VERSION)
 AC_SUBST(JACK_RELEASE)
 
-AM_INIT_AUTOMAKE(jack-audio-connection-kit,${JACK_VERSION})
+AM_INIT_AUTOMAKE(ladi-jack,${JACK_VERSION})
 
 dnl
 dnl save any user-provided CFLAGS so we can forget
