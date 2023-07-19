@@ -49,6 +49,8 @@ example-clients/jack_rec
 example-clients/jack_latent_client
 jack/version.h
 jackd/jack_md5.h
+jackd/jackdbus
+jackd/org.jackaudio.service
 jackd/jackd
 jackd/jackd.1
 tags
@@ -82,3 +84,4 @@ example-clients/jack_server_control
 man/jack_load_test.1
 tools/jack_load_test
 *.pyc
+/man/*.1
