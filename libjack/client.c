@@ -889,6 +889,7 @@ server_event_connect (jack_client_t *client, const char *server_name)
 static void
 _start_server (const char *server_name)
 {
+#if 0 /* either use jackdbus autoactivation or no actication at all */
 	FILE* fp = 0;
 	char filename[255];
 	char arguments[255];
@@ -1011,6 +1012,7 @@ failure:
 	/* If execv() succeeds, it does not return.  There's no point
 	 * in calling jack_error() here in the child process. */
 	fprintf (stderr, "exec of JACK server (command = \"%s\") failed: %s\n", command, strerror (errno));
+#endif
 }
 
 int
