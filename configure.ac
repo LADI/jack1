@@ -1036,6 +1036,7 @@ example-clients/Makefile
 tools/Makefile
 man/Makefile
 jack.pc
+jackserver.pc
 jack.spec
 jack/Makefile
 jack/version.h
