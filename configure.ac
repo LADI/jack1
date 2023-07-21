@@ -914,6 +914,7 @@ drivers/firewire/Makefile
 drivers/netjack/Makefile
 man/Makefile
 jack.pc
+jackserver.pc
 jack.spec
 jackd/Makefile
 jackd/jackd.1

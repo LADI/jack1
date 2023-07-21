@@ -19,7 +19,7 @@ SUBDIRS =      libjack jackd drivers config $(DOC_DIR) man python
 DIST_SUBDIRS = config libjack jackd include drivers doc man python
 
 pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = jack.pc
+pkgconfig_DATA = jack.pc jackserver.pc
 
 EXTRA_DIST = COPYING COPYING.GPL COPYING.LGPL libjack/simd.c jack.spec
 
