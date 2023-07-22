@@ -269,19 +269,6 @@ jack_info (const char *fmt, ...)
 	va_end (ap);
 }
 
-void
-jack_log (const char *fmt, ...)
-{
-	va_list ap;
-	char buffer[300];
-
-	//if (!engine->verbose) return;
-	va_start (ap, fmt);
-	vsnprintf (buffer, sizeof(buffer), fmt, ap);
-	jack_info_callback (buffer);
-	va_end (ap);
-}
-
 static int
 oop_client_deliver_request (void *ptr, jack_request_t *req)
 {
