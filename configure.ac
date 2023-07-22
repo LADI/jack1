@@ -645,16 +645,16 @@ if test "x$with_oldtrans" != "xno" ; then
 	AC_DEFINE(OLD_TRANSPORT,,[Include old transport interfaces])
 fi
 
-STRIPPED_JACKD=false
-AC_ARG_ENABLE(stripped-jackd,
-	AC_HELP_STRING([--enable-stripped-jackd],[strip jack before computing its md5 sum (useful only with Linux 2.4 kernel)]),
-              [ if test "x$USE_CAPABILITIES" != "xtrue" ; then	    
-                    AC_MSG_WARN([*** capabilities not enabled, stripped jackd has no effect])
-                elif test "x$enable_stripped_jackd" != "xno"; then
-                    STRIPPED_JACKD=true		    
-                fi  
-              ]	
-)
+# STRIPPED_JACKD=false
+# AC_ARG_ENABLE(stripped-jackd,
+# 	AC_HELP_STRING([--enable-stripped-jackd],[strip jack before computing its md5 sum (useful only with Linux 2.4 kernel)]),
+#               [ if test "x$USE_CAPABILITIES" != "xtrue" ; then	    
+#                     AC_MSG_WARN([*** capabilities not enabled, stripped jackd has no effect])
+#                 elif test "x$enable_stripped_jackd" != "xno"; then
+#                     STRIPPED_JACKD=true		    
+#                 fi  
+#               ]	
+# )
 
 # plugins go in the addon dir.
 
@@ -963,7 +963,7 @@ AM_CONDITIONAL(HAVE_SAMPLERATE, $HAVE_SAMPLERATE)
 AM_CONDITIONAL(HAVE_READLINE, $HAVE_READLINE)
 AM_CONDITIONAL(HAVE_DOXYGEN, $HAVE_DOXYGEN)
 AM_CONDITIONAL(USE_CAPABILITIES, $USE_CAPABILITIES)
-AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
+#AM_CONDITIONAL(STRIPPED_JACKD, $STRIPPED_JACKD)
 AM_CONDITIONAL(HAVE_PPOLL, $HAVE_PPOLL)
 
 SETTINGS_PERSISTENCE_WARNING=
@@ -1040,9 +1040,9 @@ jack.spec
 jack/Makefile
 jack/version.h
 jackd/Makefile
-jackd/jackd.1
 libjack/Makefile
 )
+#jackd/jackd.1
 
 dnl
 dnl Output summary message

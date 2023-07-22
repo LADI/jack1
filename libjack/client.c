@@ -128,6 +128,7 @@ char *jack_tmpdir = DEFAULT_TMP_DIR;
 static int
 jack_get_tmpdir ()
 {
+#if 0
 	FILE* in;
 	size_t len;
 	char buf[PATH_MAX+2]; /* allow tmpdir to live anywhere, plus newline, plus null */
@@ -201,7 +202,7 @@ jack_get_tmpdir ()
 	
 	fclose (in);
 	free (pathcopy);
-
+#endif
 	return 0;
 }
 
@@ -892,6 +893,7 @@ start_server_dbus()
 static void
 _start_server (const char *server_name)
 {
+#if 0 /* either use jackdbus autoactivation or no actication at all */
 	FILE* fp = 0;
 	char filename[255];
 	char arguments[255];
@@ -994,6 +996,7 @@ failure:
 	/* If execv() succeeds, it does not return.  There's no point
 	 * in calling jack_error() here in the child process. */
 	fprintf (stderr, "exec of JACK server (command = \"%s\") failed: %s\n", command, strerror (errno));
+#endif
 }
 
 int
