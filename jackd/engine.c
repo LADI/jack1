@@ -4288,6 +4288,7 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 	unsigned long i;
 	char *backend_client_name;
 	size_t len;
+	size_t port_alias_prefix_len;
 
 	for (i = 0; i < engine->control->n_port_types; ++i) {
 		if (strcmp (req->x.port_info.type,
@@ -4339,6 +4340,12 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 		goto fallback;
         }
 
+	VERBOSE(engine, "backend [%s]; port [%s]", backend_client_name, req->x.port_info.name);
+	port_alias_prefix_len = 0;
+	if (strncmp(req->x.port_info.name, "alsa_pcm:alsa_midi:", 19) == 0) {
+		port_alias_prefix_len = 9;
+	}
+
 	/* use backend's original as an alias, use predefined names */
 
 	if (strcmp(req->x.port_info.type, JACK_DEFAULT_AUDIO_TYPE) == 0) {
@@ -4357,12 +4364,12 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 	else if (strcmp(req->x.port_info.type, JACK_DEFAULT_MIDI_TYPE) == 0) {
 		if ((req->x.port_info.flags & (JackPortIsPhysical|JackPortIsInput)) == (JackPortIsPhysical|JackPortIsInput)) {
 			snprintf (shared->name, sizeof (shared->name), JACK_BACKEND_ALIAS ":midi_playback_%d", ++engine->midi_out_cnt);
-			strcpy (shared->alias1, req->x.port_info.name);
+			strcpy (shared->alias1, req->x.port_info.name + port_alias_prefix_len);
 			goto next;
 		} 
 		else if ((req->x.port_info.flags & (JackPortIsPhysical|JackPortIsOutput)) == (JackPortIsPhysical|JackPortIsOutput)) {
 			snprintf (shared->name, sizeof (shared->name), JACK_BACKEND_ALIAS ":midi_capture_%d", ++engine->midi_in_cnt);
-			strcpy (shared->alias1, req->x.port_info.name);
+			strcpy (shared->alias1, req->x.port_info.name + port_alias_prefix_len);
 			goto next;
 		}
 	}
