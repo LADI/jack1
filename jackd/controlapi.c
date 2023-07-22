@@ -58,6 +58,13 @@
  */
 static JSList *drivers = NULL;
 
+struct jackctl_driver
+{
+    jack_driver_desc_t * desc_ptr;
+    JSList * parameters;
+    JSList * set_parameters;
+};
+
 struct jackctl_server
 {
     JSList * drivers;
@@ -65,6 +72,7 @@ struct jackctl_server
     JSList * parameters;
 
     jack_engine_t * engine;
+    struct jackctl_driver * driver;
 
     /* string, server name */
     union jackctl_parameter_value name;
@@ -117,13 +125,6 @@ struct jackctl_server
     /* int, timeout thres... */
     union jackctl_parameter_value timothres;
     union jackctl_parameter_value default_timothres;
-};
-
-struct jackctl_driver
-{
-    jack_driver_desc_t * desc_ptr;
-    JSList * parameters;
-    JSList * set_parameters;
 };
 
 struct jackctl_internal
@@ -874,7 +875,12 @@ get_realtime_priority_constraint()
 const char *
 jack_get_version_string(void)
 {
-	return("LADI JACK1 version " VERSION);
+	return VERSION;
+}
+
+int jack_get_client_pid(const char *name)
+{
+	return 0; 		/* TODO: */
 }
 
 jackctl_server_t * jackctl_server_create(
@@ -1158,9 +1164,24 @@ const JSList * jackctl_server_get_parameters(jackctl_server_t *server_ptr)
 }
 
 bool
-jackctl_server_start(
+jackctl_server_open(
     jackctl_server_t *server_ptr,
     jackctl_driver_t *driver_ptr)
+{
+    server_ptr->driver = driver_ptr;
+    return true;
+}
+
+bool
+jackctl_server_close (
+    jackctl_server_t *server_ptr)
+{
+    return true;
+}
+
+bool
+jackctl_server_start (
+    jackctl_server_t *server_ptr)
 {
     int rc;
     sigset_t oldsignals;
@@ -1204,10 +1225,10 @@ jackctl_server_start(
 	    goto fail_unregister;
     }
 
-    if (jack_engine_load_driver (server_ptr->engine, driver_ptr->desc_ptr, driver_ptr->set_parameters))
+    if (jack_engine_load_driver (server_ptr->engine, server_ptr->driver->desc_ptr, server_ptr->driver->set_parameters))
     {
-		jack_error ("cannot load driver module %s", driver_ptr->desc_ptr->name);
-		goto fail_delete;
+	    jack_error ("cannot load driver module %s", server_ptr->driver->desc_ptr->name);
+	    goto fail_delete;
     }
 
     if (server_ptr->engine->driver->start (server_ptr->engine->driver) != 0) {
@@ -1541,3 +1562,7 @@ fail_nostart:
     return false;
 }
 
+jack_port_type_id_t jack_port_type_id (const jack_port_t *port)
+{
+	return JACK_AUDIO_PORT_TYPE; /* XXX */
+}
