@@ -871,6 +871,12 @@ get_realtime_priority_constraint()
 #endif
 }
 
+const char *
+jack_get_version_string(void)
+{
+	return("LADI JACK1 version " VERSION);
+}
+
 jackctl_server_t * jackctl_server_create(
     bool (* on_device_acquire)(const char * device_name),
     void (* on_device_release)(const char * device_name))
