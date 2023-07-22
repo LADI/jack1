@@ -667,6 +667,7 @@ void jackctl_wait_signals (sigset_t signals)
 
 #else
 
+#if 0
 static
 void
 do_nothing_handler (int sig)
@@ -679,11 +680,20 @@ do_nothing_handler (int sig)
 
 	snprintf (buf, sizeof(buf), "received signal %d during shutdown (ignored)\n", sig);
 }
+#endif
 
-sigset_t
+struct jackctl_sigmask
+{
+    sigset_t signals;
+};
+
+static struct jackctl_sigmask sigmask;
+
+jackctl_sigmask_t *
 jackctl_setup_signals (
 	unsigned int flags)
 {
+#if 0
 	sigset_t signals;
 	sigset_t allsignals;
 	struct sigaction action;
@@ -754,6 +764,13 @@ jackctl_setup_signals (
 	}
 
 	return signals;
+#else
+	//(void) signal(SIGINT, signal_handler);
+	//(void) signal(SIGABRT, signal_handler);
+	//(void) signal(SIGTERM, signal_handler);
+
+	return &sigmask;
+#endif
 }
 
 void
