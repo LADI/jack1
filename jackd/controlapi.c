@@ -1548,5 +1548,5 @@ fail_nostart:
 
 jack_port_type_id_t jack_port_type_id (const jack_port_t *port)
 {
-	return JACK_AUDIO_PORT_TYPE; /* XXX */
+	return port->shared->ptype_id;
 }
