@@ -1,8 +1,8 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl $Id$
 
-AC_INIT([jack-audio-connection-kit],[0.126.0],
-                [jack-devel@lists.jackaudio.org],[],[http://www.jackaudio.org/])
+AC_INIT([ladi-jack],[1.126.1],
+                [jack1@ladi.internal],[],[http://ladish.org/])
 
 #AC_CONFIG_SRCDIR([jackd/jackd.c])
 
