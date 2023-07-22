@@ -28,6 +28,8 @@
 
 #include "config.h"
 
+#include <stdarg.h>
+
 #include "jack/internal.h"
 #include <string.h>
 #include <errno.h>
@@ -870,6 +872,19 @@ get_realtime_priority_constraint()
 #else
     return NULL
 #endif
+}
+
+void
+jack_log (const char *fmt, ...)
+{
+	va_list ap;
+	char buffer[300];
+
+	//if (!engine->verbose) return; /* TODO */
+	va_start (ap, fmt);
+	vsnprintf (buffer, sizeof(buffer), fmt, ap);
+	jack_info_callback (buffer);
+	va_end (ap);
 }
 
 const char *
