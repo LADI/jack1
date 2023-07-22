@@ -699,13 +699,6 @@ if test "x$USE_BARRIER" = "xyes"; then
 		AC_DEFINE(USE_BARRIER, 1, [Use pthread barrier functions]))
 fi
 
-# some example-clients need libsndfile
-HAVE_SNDFILE=false
-PKG_CHECK_MODULES(SNDFILE, sndfile >= 1.0,[HAVE_SNDFILE=true], [true])
-if test x$HAVE_SNDFILE = xfalse; then
-             AC_MSG_WARN([*** the jackrec example client will not be built])
-fi
-
 # NetJack backend and internal client need libsamplerate
 HAVE_SAMPLERATE=false
 PKG_CHECK_MODULES(SAMPLERATE, samplerate >= 0.1.2,[HAVE_SAMPLERATE=true], [true])
@@ -927,29 +920,6 @@ AC_DEFINE_UNQUOTED(JACK_SEMAPHORE_KEY,
 	  [ an integer constant used as the semaphore and SysV SHM key. see libjack/shm.c for usage])
 AC_SUBST(JACK_SEMAPHORE_KEY)
 
-# On some systems, readline depends on termcap or ncurses.  But, the
-# MacOSX linker complains bitterly if these libraries are explicitly
-# referenced.  
-#
-# AC_CHECK_LIB() foolishly assumes that checking a library for an entry
-# point always returns the same result regardless of any dependent
-# libraries specified.  The `unset ac_cv_lib_readline_readline' erases
-# the cached result to work around this problem.
-READLINE_DEPS=""
-HAVE_READLINE=true
-AC_CHECK_LIB(readline, readline, [:],
-    [unset ac_cv_lib_readline_readline
-     AC_CHECK_LIB(readline, readline, [READLINE_DEPS="-ltermcap"],
-        [unset ac_cv_lib_readline_readline
-	 AC_CHECK_LIB(readline, readline,
-	    [READLINE_DEPS="-lncurses"], [HAVE_READLINE=false], "-lncurses")],
-	"-ltermcap")])
-AC_CHECK_HEADER(readline/chardefs.h, [], [HAVE_READLINE=false])
-if test x$HAVE_READLINE = xfalse; then
-	AC_MSG_WARN([*** the jack_transport example client will not be built])
-fi
-AC_SUBST(READLINE_DEPS)
-
 # you need doxygen to make dist.
 AC_CHECK_PROG(HAVE_DOXYGEN, doxygen, true, false)
 if test $HAVE_DOXYGEN = "false"; then
@@ -1031,8 +1001,6 @@ drivers/coreaudio/Makefile
 drivers/freebob/Makefile
 drivers/firewire/Makefile
 drivers/netjack/Makefile
-example-clients/Makefile
-tools/Makefile
 man/Makefile
 jack.pc
 jackserver.pc
