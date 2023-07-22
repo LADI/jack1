@@ -4354,8 +4354,6 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 		}
 	}
 
-#if 0 // do not do this for MIDI
-
 	else if (strcmp(req->x.port_info.type, JACK_DEFAULT_MIDI_TYPE) == 0) {
 		if ((req->x.port_info.flags & (JackPortIsPhysical|JackPortIsInput)) == (JackPortIsPhysical|JackPortIsInput)) {
 			snprintf (shared->name, sizeof (shared->name), JACK_BACKEND_ALIAS ":midi_playback_%d", ++engine->midi_out_cnt);
@@ -4368,7 +4366,6 @@ jack_port_do_register (jack_engine_t *engine, jack_request_t *req, int internal)
 			goto next;
 		}
 	}
-#endif
 
 fallback:
 	strcpy (shared->name, req->x.port_info.name);
