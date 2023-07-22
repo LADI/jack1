@@ -417,22 +417,23 @@ int can_pass(size_t sz, jack_ringbuffer_t *in, jack_ringbuffer_t *out)
 }
 
 static
-void midi_port_init(const alsa_rawmidi_t *midi, midi_port_t *port, snd_rawmidi_info_t *info, const alsa_id_t *id)
+void midi_port_init(const alsa_rawmidi_t *midi, midi_port_t *port, snd_rawmidi_info_t *info, const alsa_id_t *id, const char * cardstr)
 {
 	const char *name;
 	char *c;
 
 	port->id = *id;
-	snprintf(port->dev, sizeof(port->dev), "hw:%d,%d,%d", id->id[0], id->id[1], id->id[3]);
+	snprintf(port->dev, sizeof(port->dev), "hw:%s,%d,%d", cardstr, id->id[1], id->id[3]);
 	name = snd_rawmidi_info_get_subdevice_name(info);
 	if (!strlen(name))
 		name = snd_rawmidi_info_get_name(info);
-	snprintf(port->name, sizeof(port->name), "%s %s %s", port->id.id[2] ? "out":"in", port->dev, name);
+	const char prefix[] = "alsa_midi:";
+	snprintf(port->name, sizeof(port->name), "%shw:%s:%d,%d %s %s", prefix, cardstr, id->id[1], id->id[3], name, port->id.id[2] ? "out":"in");
 
-	// replace all offending characters with '-'
-	for (c=port->name; *c; ++c)
+	// replace all offending characters with '_'
+	for (c=port->name+strlen(prefix)+3+strlen(cardstr)+1; *c; ++c)
 	        if (!isalnum(*c))
-			*c = '-';
+			*c = '_';
 
 	port->state = PORT_CREATED;
 }
@@ -662,11 +663,20 @@ midi_port_t** scan_port_add(scan_t *scan, const alsa_id_t *id, midi_port_t **lis
 {
 	midi_port_t *port;
 	midi_stream_t *str = id->id[2] ? &scan->midi->out : &scan->midi->in;
+	snd_ctl_card_info_t * info;
+
+	snd_ctl_card_info_alloca(&info);
+	if (snd_ctl_card_info(scan->ctl, info) < 0) return list;
 
 	port = calloc(1, str->port_size);
 	if (!port)
 		return list;
-	midi_port_init(scan->midi, port, scan->info, id);
+	midi_port_init(
+		scan->midi,
+		port,
+		scan->info,
+		id,
+		snd_ctl_card_info_get_id(info));
 
 	port->next = *list;
 	*list = port;
