@@ -29,6 +29,10 @@ rpm: dist
 dist-hook: dist-check-doxygen
 
 if HAVE_DBUS
+
+install-exec-hook:
+	cp -v $(srcdir)/jack_control/jack_control.py $(DESTDIR)$(bindir)/jack_control
+
 install-data-hook:
 	@if test "`ps h -C jackdbus`" ; then echo; echo; echo 'WARNING: jackdbus seems to be running, you may want to deactivate current service using "jack_control exit".'; echo; echo; fi
 endif

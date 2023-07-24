@@ -1,0 +1,3 @@
+[submodule "jack_control"]
+	path = jack_control
+	url = ../jack_control
