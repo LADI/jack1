@@ -388,7 +388,7 @@ jack_drivers_load(
 	unsigned int drivers_count;
 
 	if ((driver_dir = getenv("JACK_DRIVER_DIR")) == 0) {
-		driver_dir = ADDON_DIR;
+		driver_dir = JACK_DRIVER_DIR;
 	}
 
 	if (server_ptr->verbose.b) {

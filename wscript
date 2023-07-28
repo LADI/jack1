@@ -73,6 +73,30 @@ def configure(conf):
     conf.define('JACK_DRIVER_DIR', conf.env['JACK_DRIVER_DIR'])
     conf.define('JACK_INTERNAL_DIR', conf.env['JACK_INTERNAL_DIR'])
 
+    if not conf.check_cfg(package='dbus-1 >= 1.0.0', args='--cflags --libs', mandatory=False):
+        print(
+            Logs.colors.RED + 'ERROR !! jackdbus will not be built because libdbus-dev is missing' + Logs.colors.NORMAL
+        )
+        return
+
+    dbus_dir = conf.check_cfg(package='dbus-1', args='--variable=session_bus_services_dir')
+    if not dbus_dir:
+        print(
+            Logs.colors.RED + 'ERROR !! jackdbus will not be built because service dir is unknown' + Logs.colors.NORMAL
+        )
+        return
+
+    dbus_dir = dbus_dir.strip()
+    conf.env['DBUS_SERVICES_DIR_REAL'] = dbus_dir
+
+#    if Options.options.enable_pkg_config_dbus_service_dir:
+    conf.env['DBUS_SERVICES_DIR'] = dbus_dir
+#    else:
+#        conf.env['DBUS_SERVICES_DIR'] = os.path.normpath(conf.env['PREFIX'] + '/share/dbus-1/services')
+
+    conf.check_cfg(package='expat', args='--cflags --libs')
+    conf.env['LIB_M'] = ['m']
+
     flags.add_c('-std=gnu99')
     if conf.env['BUILD_DEVMODE']:
         flags.add_c(['-Wall', '-Wextra'])
@@ -105,6 +129,8 @@ def configure(conf):
     conf.define('USE_POSIX_SHM', 0)
     conf.define('DEFAULT_TMP_DIR', '/dev/shm')
     conf.define('JACK_SEMAPHORE_KEY', 0x282929)
+    conf.define('JACK_DEFAULT_DRIVER', 'dummy')
+    conf.define('JACK_VERSION', VERSION)
     conf.write_config_header('config.h', remove=False)
     flags.flush()
 
@@ -179,17 +205,59 @@ def build(bld):
     clientlib.target = 'jack'
     clientlib.install_path = '${LIBDIR}'
     clientlib.source = [
-	"libjack/client.c",
-	"libjack/intclient.c",
-	"libjack/messagebuffer.c",
-	"libjack/pool.c",
-	"libjack/port.c",
-	"libjack/midiport.c",
-	"libjack/ringbuffer.c",
-	"libjack/shm.c",
-	"libjack/thread.c",
-	"libjack/time.c",
-	"libjack/timestamps.c",
-	"libjack/transclient.c",
-	"libjack/unlock.c",
+        "libjack/client.c",
+        "libjack/intclient.c",
+        "libjack/messagebuffer.c",
+        "libjack/pool.c",
+        "libjack/port.c",
+        "libjack/midiport.c",
+        "libjack/ringbuffer.c",
+        "libjack/shm.c",
+        "libjack/thread.c",
+        "libjack/time.c",
+        "libjack/timestamps.c",
+        "libjack/transclient.c",
+        "libjack/unlock.c",
     ]
+
+    obj = bld(features=['c', 'cprogram'])
+    obj.defines = ['HAVE_CONFIG_H']
+    obj.use = ['DBUS-1', 'EXPAT', 'M']
+    obj.includes = includes
+    obj.source = [
+        'server/engine.c',
+        'server/clientengine.c',
+        'server/transengine.c',
+        'server/jackdbus.c',
+        'server/jackctl.c',
+        'server/jackcontroller.c',
+        'server/jackcontroller_iface_introspectable.c',
+        'server/jackcontroller_iface_control.c',
+        'server/jackcontroller_iface_configure.c',
+        'server/jackcontroller_iface_patchbay.c',
+        'server/jackcontroller_iface_transport.c',
+        'server/jackcontroller_xml_expat.c',
+        'server/jackcontroller_xml.c',
+        'server/jackcontroller_xml_write_raw.c',
+	'libjack/client.c',
+        'libjack/transclient.c',
+	'libjack/messagebuffer.c',
+	'libjack/thread.c',
+	'libjack/shm.c',
+	'libjack/time.c',
+	'libjack/port.c',
+	'libjack/midiport.c',
+	'libjack/ringbuffer.c',
+	'libjack/pool.c',
+        ]
+    obj.target = 'jackdbus'
+
+    # process org.jackaudio.service.in -> org.jackaudio.service
+    # obj = bld(
+    #     features='subst',
+    #     source='org.jackaudio.service.in',
+    #     target='org.jackaudio.service',
+    #     install_path='${DBUS_SERVICES_DIR}/',
+    #     BINDIR=bld.env['PREFIX'] + '/bin')
+
+    #bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)

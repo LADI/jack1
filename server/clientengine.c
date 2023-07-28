@@ -32,7 +32,6 @@
 #include <jack/internal.h>
 #include <jack/engine.h>
 #include <jack/messagebuffer.h>
-#include <jack/version.h>
 #include <jack/driver.h>
 #include <sysdeps/poll.h>
 #include <sysdeps/ipc.h>
@@ -97,7 +96,7 @@ jack_load_client (jack_engine_t *engine, jack_client_internal_t *client,
 	const char *errstr;
 	char path_to_so[PATH_MAX+1];
 
-	snprintf (path_to_so, sizeof (path_to_so), ADDON_DIR "/%s.so", so_name);
+	snprintf (path_to_so, sizeof (path_to_so), JACK_INTERNAL_DIR "/%s.so", so_name);
 	client->handle = dlopen (path_to_so, RTLD_NOW|RTLD_GLOBAL);
 	
 	if (client->handle == 0) {

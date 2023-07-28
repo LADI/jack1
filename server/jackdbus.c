@@ -32,6 +32,7 @@
 
 #include "jackdbus.h"
 #include "jackcontroller.h"
+#include "version.h"
 
 FILE *g_logfile;
 char *g_jackdbus_config_dir;
@@ -821,7 +822,8 @@ main (int argc, char **argv)
 	jack_set_info_function(jack_dbus_info_callback);
 
 	jack_info("------------------");
-	jack_info("Controller activated. Version " VERSION);
+	jack_info("Controller activated. Version " JACK_VERSION);
+	jack_info("Built from " GIT_VERSION);
 
 	if (!dbus_threads_init_default())
 	{
