@@ -5,6 +5,7 @@ libjackincludedir = $(includedir)/jack
 libjackinclude_HEADERS = 	\
 	intclient.h		\
 	jack.h			\
+	jslist.h		\
 	ringbuffer.h		\
 	statistics.h            \
 	session.h               \
@@ -27,7 +28,6 @@ noinst_HEADERS =		\
 	hardware.h 		\
 	internal.h 		\
 	intsimd.h 		\
-	jslist.h		\
 	list.h                  \
 	memops.h		\
 	messagebuffer.h		\
