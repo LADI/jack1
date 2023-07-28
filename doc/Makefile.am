@@ -5,8 +5,6 @@ CLEANFILES=doxygen-build.stamp
 
 DOX=reference.doxygen
 DOXSOURCES=mainpage.dox transport.dox porting.dox fsm.png fsm.eps \
-	../example-clients/inprocess.c \
-	../example-clients/simple_client.c \
 	../jack/intclient.h \
 	../jack/jack.h \
 	../jack/port.h \
@@ -18,6 +16,9 @@ DOXSOURCES=mainpage.dox transport.dox porting.dox fsm.png fsm.eps \
 	../jack/session.h \
 	../jack/weakjack.h \
 	../jack/control.h
+
+#       ../example-clients/inprocess.c
+#       ../example-clients/simple_client.c
 
 EXTRA_DIST=mainpage.dox transport.dox fsm.png fsm.eps porting.dox
 

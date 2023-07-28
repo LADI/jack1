@@ -1032,9 +1032,6 @@ drivers/coreaudio/Makefile
 drivers/freebob/Makefile
 drivers/firewire/Makefile
 drivers/netjack/Makefile
-example-clients/Makefile
-tools/Makefile
-man/Makefile
 jack.pc
 jackserver.pc
 jack.spec
@@ -1043,6 +1040,9 @@ jack/version.h
 jackd/Makefile
 libjack/Makefile
 )
+#example-clients/Makefile
+#tools/Makefile
+#man/Makefile
 #jackd/jackd.1
 
 dnl
