@@ -2,7 +2,6 @@
 *** README.developers - JACK development practices                  ***
 =======================================================================
 
-:Version: $Id$
 :Formatting: restructured text, http://docutils.sourceforge.net/rst.html
 
 What is this? 
