@@ -42,7 +42,6 @@
 #include <jack/engine.h>
 #include <jack/pool.h>
 #include <jack/jslist.h>
-#include <jack/version.h>
 #include <jack/shm.h>
 #include <jack/unlock.h>
 #include <jack/thread.h>

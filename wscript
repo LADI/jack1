@@ -57,6 +57,7 @@ def display_feature(conf, msg, build):
         conf.msg(msg, 'no', color='YELLOW')
 
 def configure(conf):
+    conf.load('compiler_c')
     conf.load('waf_autooptions')
 
     flags = WafToolchainFlags(conf)
@@ -98,6 +99,13 @@ def configure(conf):
         flags.add_c(['-O0', '-g', '-fno-omit-frame-pointer'])
         flags.add_link('-g')
 
+    conf.define('JACK_THREAD_STACK_TOUCH', 500000)
+    conf.define('jack_protocol_version', 24)
+    conf.define('JACK_SHM_TYPE', 'System V')
+    conf.define('USE_POSIX_SHM', 0)
+    conf.define('DEFAULT_TMP_DIR', '/dev/shm')
+    conf.define('JACK_SEMAPHORE_KEY', 0x282929)
+    conf.write_config_header('config.h', remove=False)
     flags.flush()
 
     print()
@@ -162,3 +170,26 @@ def git_ver(self):
 
 def build(bld):
     bld(rule=git_ver, target='version.h', update_outputs=True, always=True, ext_out=['.h'])
+
+    includes = ['.', './jack', './config', '..']
+
+    clientlib = bld(features=['c', 'cshlib'])
+    clientlib.defines = 'HAVE_CONFIG_H'
+    clientlib.includes = includes
+    clientlib.target = 'jack'
+    clientlib.install_path = '${LIBDIR}'
+    clientlib.source = [
+	"libjack/client.c",
+	"libjack/intclient.c",
+	"libjack/messagebuffer.c",
+	"libjack/pool.c",
+	"libjack/port.c",
+	"libjack/midiport.c",
+	"libjack/ringbuffer.c",
+	"libjack/shm.c",
+	"libjack/thread.c",
+	"libjack/time.c",
+	"libjack/timestamps.c",
+	"libjack/transclient.c",
+	"libjack/unlock.c",
+    ]

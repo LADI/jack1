@@ -49,7 +49,6 @@
 
 #include <jack/shm.h>
 #include <jack/internal.h>
-#include <jack/version.h>
 
 #ifdef USE_POSIX_SHM
 static jack_shmtype_t jack_shmtype = shm_POSIX;
