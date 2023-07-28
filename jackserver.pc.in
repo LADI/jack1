@@ -4,8 +4,8 @@ libdir=@libdir@
 includedir=@includedir@
 jack_implementation=ladi-jack1
 
-Name: jack
-Description: the Jack Audio Connection Kit: a low-latency synchronous callback-based media server
+Name: jackserver
+Description: JACK server API
 Version: @JACK_VERSION@
-Libs: -L${libdir} -ljack -lpthread @OS_LDFLAGS@
+Libs: -L${libdir} -ljackserver
 Cflags: -I${includedir}
