@@ -317,7 +317,7 @@ jack_drivers_get_descriptor (JSList * drivers, const char * sofile)
 	char* driver_dir;
 
 	if ((driver_dir = getenv("JACK_DRIVER_DIR")) == 0) {
-		driver_dir = ADDON_DIR;
+		driver_dir = JACK_DRIVER_DIR;
 	}
 	filename = malloc (strlen (driver_dir) + 1 + strlen (sofile) + 1);
 	sprintf (filename, "%s/%s", driver_dir, sofile);
@@ -384,7 +384,7 @@ jack_drivers_load ()
 	char* driver_dir;
 
 	if ((driver_dir = getenv("JACK_DRIVER_DIR")) == 0) {
-		driver_dir = ADDON_DIR;
+		driver_dir = JACK_DRIVER_DIR;
 	}
 
 	/* search through the driver_dir and add get descriptors

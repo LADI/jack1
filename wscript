@@ -247,9 +247,37 @@ def build(bld):
         "libjack/unlock.c",
     ]
 
+    serverlib = bld(features=['c', 'cshlib'])
+    serverlib.defines = 'HAVE_CONFIG_H'
+    serverlib.includes = includes
+    serverlib.target = 'jackserver'
+    serverlib.vnum = bld.env['JACK_API_VERSION']
+    serverlib.install_path = '${LIBDIR}'
+    serverlib.source = [
+        'server/engine.c',
+        'server/clientengine.c',
+        'server/transengine.c',
+        'server/controlapi.c',
+        'libjack/systemtest.c',
+        'libjack/sanitycheck.c',
+        'libjack/client.c',
+        'libjack/driver.c',
+        'libjack/intclient.c',
+        'libjack/messagebuffer.c',
+        'libjack/pool.c',
+        'libjack/port.c',
+        'libjack/midiport.c',
+        'libjack/ringbuffer.c',
+        'libjack/shm.c',
+        'libjack/thread.c',
+        'libjack/time.c',
+        'libjack/transclient.c',
+        'libjack/unlock.c',
+    ]
+
     obj = bld(features=['c', 'cprogram'])
     obj.defines = ['HAVE_CONFIG_H']
-    obj.use = ['DBUS-1', 'EXPAT', 'M']
+    obj.use = ['DBUS-1', 'EXPAT', 'M', 'jackserver']
     obj.includes = includes
     obj.source = [
         'server/engine.c',
@@ -266,16 +294,6 @@ def build(bld):
         'server/jackcontroller_xml_expat.c',
         'server/jackcontroller_xml.c',
         'server/jackcontroller_xml_write_raw.c',
-	'libjack/client.c',
-        'libjack/transclient.c',
-	'libjack/messagebuffer.c',
-	'libjack/thread.c',
-	'libjack/shm.c',
-	'libjack/time.c',
-	'libjack/port.c',
-	'libjack/midiport.c',
-	'libjack/ringbuffer.c',
-	'libjack/pool.c',
         ]
     obj.target = 'jackdbus'
 
@@ -288,3 +306,33 @@ def build(bld):
         BINDIR=bld.env['PREFIX'] + '/bin')
 
     #bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)
+
+    driver = bld(
+        features=['c', 'cshlib'],
+        defines=['HAVE_CONFIG_H'],
+        includes=includes,
+	use = ['serverlib'],
+        target='dummy',
+        install_path='${JACK_DRIVER_DIR}/')
+    driver.env['cshlib_PATTERN'] = '%s.so'
+    driver.source = ['drivers/dummy/dummy_driver.c']
+
+    driver = bld(
+        features=['c', 'cshlib'],
+        defines=['HAVE_CONFIG_H'],
+        includes=includes,
+	use = ['ALSA', 'serverlib'],
+        target='alsa',
+        install_path='${JACK_DRIVER_DIR}/')
+    driver.env['cshlib_PATTERN'] = '%s.so'
+    driver.source = [
+        'drivers/alsa/alsa_driver.c',
+        'drivers/alsa/generic_hw.c',
+        'drivers/alsa/memops.c',
+        'drivers/alsa/hammerfall.c',
+        'drivers/alsa/hdsp.c',
+        'drivers/alsa/ice1712.c',
+        'drivers/alsa/usx2y.c',
+        'drivers/alsa-midi/alsa_rawmidi.c',
+        'drivers/alsa-midi/alsa_seqmidi.c',
+    ]
