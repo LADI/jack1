@@ -60,6 +60,8 @@ def configure(conf):
     conf.load('compiler_c')
     conf.load('waf_autooptions')
 
+    conf.env['JACK_API_VERSION'] = JACK_API_VERSION
+
     flags = WafToolchainFlags(conf)
 
     conf.env['JACK_DRIVER_DIR'] = os.path.normpath(
@@ -203,6 +205,7 @@ def build(bld):
     clientlib.defines = 'HAVE_CONFIG_H'
     clientlib.includes = includes
     clientlib.target = 'jack'
+    clientlib.vnum = bld.env['JACK_API_VERSION']
     clientlib.install_path = '${LIBDIR}'
     clientlib.source = [
         "libjack/client.c",
