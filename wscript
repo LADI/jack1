@@ -336,3 +336,17 @@ def build(bld):
         'drivers/alsa-midi/alsa_rawmidi.c',
         'drivers/alsa-midi/alsa_seqmidi.c',
     ]
+
+    driver = bld(
+        features=['c', 'cshlib'],
+        defines=['HAVE_CONFIG_H'],
+        includes=includes,
+	use = ['ALSA', 'serverlib'],
+        target='alsa_midi',
+        install_path='${JACK_DRIVER_DIR}/')
+    driver.env['cshlib_PATTERN'] = '%s.so'
+    driver.source = [
+        'drivers/alsa-midi/alsa_rawmidi.c',
+        'drivers/alsa-midi/alsa_seqmidi.c',
+        'drivers/alsa-midi/alsa_midi_driver.c',
+    ]
