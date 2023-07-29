@@ -47,6 +47,13 @@ def options(opt):
         default=False,
     )
 
+    opt.add_option(
+        '--enable-pkg-config-dbus-service-dir',
+        action='store_true',
+        default=False,
+        help='force D-Bus service install dir to be one returned by pkg-config',
+    )
+
     # this must be called before the configure phase
     opt.apply_auto_options_hack()
 
@@ -91,10 +98,10 @@ def configure(conf):
     dbus_dir = dbus_dir.strip()
     conf.env['DBUS_SERVICES_DIR_REAL'] = dbus_dir
 
-#    if Options.options.enable_pkg_config_dbus_service_dir:
-    conf.env['DBUS_SERVICES_DIR'] = dbus_dir
-#    else:
-#        conf.env['DBUS_SERVICES_DIR'] = os.path.normpath(conf.env['PREFIX'] + '/share/dbus-1/services')
+    if Options.options.enable_pkg_config_dbus_service_dir:
+        conf.env['DBUS_SERVICES_DIR'] = dbus_dir
+    else:
+        conf.env['DBUS_SERVICES_DIR'] = os.path.normpath(conf.env['PREFIX'] + '/share/dbus-1/services')
 
     conf.check_cfg(package='expat', args='--cflags --libs')
     conf.env['LIB_M'] = ['m']
@@ -151,6 +158,23 @@ def configure(conf):
     conf.msg('Library directory', conf.all_envs['']['LIBDIR'], color='CYAN')
     conf.msg('Drivers directory', conf.env['JACK_DRIVER_DIR'], color='CYAN')
     conf.msg('Internal clients directory', conf.env['JACK_INTERNAL_DIR'], color='CYAN')
+
+    conf.msg('D-Bus service install directory', conf.env['DBUS_SERVICES_DIR'], color='CYAN')
+
+    if conf.env['DBUS_SERVICES_DIR'] != conf.env['DBUS_SERVICES_DIR_REAL']:
+        print()
+        print(Logs.colors.RED + 'WARNING: D-Bus session services directory as reported by pkg-config is')
+        print(Logs.colors.RED + 'WARNING:', end=' ')
+        print(Logs.colors.CYAN + conf.env['DBUS_SERVICES_DIR_REAL'])
+        print(Logs.colors.RED + 'WARNING: but service file will be installed in')
+        print(Logs.colors.RED + 'WARNING:', end=' ')
+        print(Logs.colors.CYAN + conf.env['DBUS_SERVICES_DIR'])
+        print(
+            Logs.colors.RED + 'WARNING: You may need to adjust your D-Bus configuration after installing jackdbus'
+            )
+        print('WARNING: You can override dbus service install directory')
+        print('WARNING: with --enable-pkg-config-dbus-service-dir option to this script')
+        print(Logs.colors.NORMAL)
     display_feature(conf, 'Build debuggable binaries', conf.env['BUILD_DEBUG'])
 
     tool_flags = [
@@ -256,11 +280,11 @@ def build(bld):
     obj.target = 'jackdbus'
 
     # process org.jackaudio.service.in -> org.jackaudio.service
-    # obj = bld(
-    #     features='subst',
-    #     source='org.jackaudio.service.in',
-    #     target='org.jackaudio.service',
-    #     install_path='${DBUS_SERVICES_DIR}/',
-    #     BINDIR=bld.env['PREFIX'] + '/bin')
+    obj = bld(
+        features='subst',
+        source='server/org.jackaudio.service.in',
+        target='org.jackaudio.service',
+        install_path='${DBUS_SERVICES_DIR}/',
+        BINDIR=bld.env['PREFIX'] + '/bin')
 
     #bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)
