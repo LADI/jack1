@@ -7,3 +7,6 @@
 [submodule "waf-autooptions"]
 	path = waf_autooptions
 	url = ../waf-autooptions
+[submodule "jack-tools"]
+	path = tools
+	url = ../jack-tools
