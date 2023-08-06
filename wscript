@@ -74,6 +74,12 @@ def options(opt):
         help='force D-Bus service install dir to be one returned by pkg-config',
     )
 
+    db = opt.add_auto_option(
+            'db',
+            help='Use Berkeley DB (metadata)')
+    db.check(header_name='db.h')
+    db.check(lib='db')
+
     # this must be called before the configure phase
     opt.apply_auto_options_hack()
 
@@ -253,7 +259,13 @@ def git_ver(self):
 def build(bld):
     bld(rule=git_ver, target='version.h', update_outputs=True, always=True, ext_out=['.h'])
 
-    includes = ['.', './jack', './config', '..']
+    includes = [
+	'.',
+	'./jack',
+	'./include',
+	'./config',
+	'..',
+    ]
 
     clientlib = bld(features=['c', 'cshlib'])
     clientlib.defines = 'HAVE_CONFIG_H'
@@ -272,9 +284,10 @@ def build(bld):
         "libjack/shm.c",
         "libjack/thread.c",
         "libjack/time.c",
-        "libjack/timestamps.c",
         "libjack/transclient.c",
         "libjack/unlock.c",
+        "libjack/uuid.c",
+        "libjack/metadata.c",
     ]
 
     bld.install_files(
@@ -287,7 +300,6 @@ def build(bld):
             "jack/statistics.h",
             "jack/session.h",
             "jack/thread.h",
-            "jack/timestamps.h",
             "jack/transport.h",
             "jack/types.h",
             "jack/midiport.h",
@@ -313,6 +325,7 @@ def build(bld):
     serverlib.target = 'jackserver'
     serverlib.vnum = bld.env['JACK_API_VERSION']
     serverlib.install_path = '${LIBDIR}'
+    serverlib.use = ['DB']
     serverlib.source = [
         'server/engine.c',
         'server/clientengine.c',
@@ -333,6 +346,8 @@ def build(bld):
         'libjack/time.c',
         'libjack/transclient.c',
         'libjack/unlock.c',
+        "libjack/uuid.c",
+        "libjack/metadata.c",
     ]
 
     # process jackserver.pc.in -> jackserver.pc
