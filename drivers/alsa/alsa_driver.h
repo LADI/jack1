@@ -22,7 +22,7 @@
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm.h>
-#include <jack/bitset.h>
+#include "bitset.h"
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define IS_LE 0
@@ -32,13 +32,11 @@
 #define IS_BE 0
 #endif
 
-#include <jack/types.h>
-#include <jack/hardware.h>
-#include <jack/driver.h>
 #include <jack/jack.h>
-#include <jack/memops.h>
-
-#include "../alsa-midi/alsa_midi.h"
+#include <jack/types.h>
+#include "hardware.h"
+#include "driver.h"
+#include "memops.h"
 
 typedef void (*ReadCopyFunction)  (jack_default_audio_sample_t *dst, char *src,
 				   unsigned long src_bytes,
@@ -136,8 +134,8 @@ typedef struct _alsa_driver {
     int xrun_count;
     int process_count;
 
-    alsa_midi_t *midi;
     int xrun_recovery;
+    int previously_successfully_configured;
 
 } alsa_driver_t;
 

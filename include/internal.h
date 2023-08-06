@@ -56,10 +56,12 @@ extern void jack_info (const char *fmt, ...);
 
 #include <jack/jack.h>
 #include <jack/types.h>
-#include <jack/port.h>
 #include <jack/transport.h>
 #include <jack/session.h>
 #include <jack/thread.h>
+#include <jack/metadata.h>
+
+#include "port.h"
 
 extern jack_thread_creator_t jack_thread_creator;
 
@@ -80,7 +82,7 @@ const char* jack_clock_source_name (jack_timer_type_t);
 #include <sysdeps/mach_port.h>
 #endif
 
-#include <jack/messagebuffer.h>
+#include "messagebuffer.h"
 
 #ifndef PATH_MAX
     #ifdef MAXPATHLEN
@@ -154,14 +156,14 @@ typedef struct {
 	volatile jack_nframes_t frames;  
 	volatile jack_time_t    current_wakeup;
 	volatile jack_time_t    next_wakeup;
-	volatile float          second_order_integrator;
+	volatile float          period_usecs;
 	volatile int32_t        initialized;
 	volatile uint32_t       guard2;
 	
 	/* not accessed by clients */
 
 	int32_t  reset_pending;      /* xrun happened, deal with it */
-	float    filter_coefficient; /* set once, never altered */
+	float    filter_omega;       /* set once, never altered */
 
 } POST_PACKED_STRUCTURE jack_frame_timer_t;
 
@@ -220,8 +222,12 @@ typedef enum  {
   ClientRegistered,
   ClientUnregistered,
   SaveSession,
-  LatencyCallback
+  LatencyCallback,
+  PropertyChange,
+  PortRename
 } JackEventType;
+
+const char* jack_event_type_name (JackEventType);
 
 typedef struct {
     JackEventType type;
@@ -230,12 +236,18 @@ typedef struct {
         char name[JACK_PORT_NAME_SIZE];    
 	jack_port_id_t port_id;
 	jack_port_id_t self_id;
+        jack_uuid_t    uuid;
     } x;
     union {
 	uint32_t n;
 	jack_port_type_id_t ptid;
 	jack_port_id_t other_id;
+        uint32_t key_size; /* key data will follow the event structure */
     } y;
+    union {        
+            char other_name[JACK_PORT_NAME_SIZE];
+            jack_property_change_t property_change;
+    } z;
 } POST_PACKED_STRUCTURE jack_event_t;
 
 typedef enum {
@@ -254,8 +266,7 @@ typedef enum {
 /* JACK client shared memory data structure. */
 typedef volatile struct {
 
-    volatile jack_client_id_t id;         /* w: engine r: engine and client */
-    volatile jack_client_id_t uid;        /* w: engine r: engine and client */
+    jack_uuid_t         uuid;            /* w: engine r: engine and client */
     volatile jack_client_state_t state;   /* w: engine and client r: engine */
     volatile char	name[JACK_CLIENT_NAME_SIZE];
     volatile char	session_command[JACK_PORT_NAME_SIZE];
@@ -299,6 +310,8 @@ typedef volatile struct {
     volatile uint8_t	thread_cb_cbset;
     volatile uint8_t	session_cbset;
     volatile uint8_t	latency_cbset;
+    volatile uint8_t	property_cbset;
+    volatile uint8_t	port_rename_cbset;
 
 } POST_PACKED_STRUCTURE jack_client_control_t;
 
@@ -308,7 +321,7 @@ typedef struct {
     int32_t    load;
     ClientType type;
     jack_options_t options;
-    jack_client_id_t uuid;
+    jack_uuid_t uuid;
 
     char name[JACK_CLIENT_NAME_SIZE];
     char object_path[PATH_MAX+1];
@@ -347,7 +360,7 @@ typedef struct {
 } POST_PACKED_STRUCTURE jack_client_connect_result_t;
 
 typedef struct {
-    jack_client_id_t client_id;
+    jack_uuid_t client_id;
 } POST_PACKED_STRUCTURE jack_client_connect_ack_request_t;
 
 typedef struct {
@@ -381,9 +394,11 @@ typedef enum {
 	RecomputeTotalLatency = 24,
 	SessionNotify = 25,
 	GetClientByUUID = 26,
+	GetUUIDByClientName = 27,
 	ReserveName = 30,
 	SessionReply = 31,
-	SessionHasCallback = 32
+	SessionHasCallback = 32,
+        PropertyChangeNotify = 33
 } RequestType;
 
 struct _jack_request {
@@ -397,7 +412,7 @@ struct _jack_request {
 	    uint32_t         flags;
 	    jack_shmsize_t   buffer_size;
 	    jack_port_id_t   port_id;
-	    jack_client_id_t client_id;
+	    jack_uuid_t      client_id;
 	} POST_PACKED_STRUCTURE port_info;
 	struct {
 	    char source_port[JACK_PORT_NAME_SIZE];
@@ -422,22 +437,28 @@ struct _jack_request {
 				*/
 	} POST_PACKED_STRUCTURE port_connections;
 	struct {
-	    jack_client_id_t client_id;
+	    jack_uuid_t client_id;
 	    int32_t conditional;
 	} POST_PACKED_STRUCTURE timebase;
 	struct {
 	    char name[JACK_CLIENT_NAME_SIZE];
-	    jack_client_id_t uuid;
+	    jack_uuid_t uuid;
 	} POST_PACKED_STRUCTURE reservename;
 	struct {
 	    //jack_options_t options;
 	    uint32_t options;
-	    jack_client_id_t id;
+	    jack_uuid_t uuid;
 	    char name[JACK_CLIENT_NAME_SIZE];
 	    char path[PATH_MAX+1];
 	    char init[JACK_LOAD_INIT_LIMIT];
 	} POST_PACKED_STRUCTURE intclient;
-	jack_client_id_t client_id;
+        struct { 
+                jack_property_change_t change;
+                jack_uuid_t uuid;
+                size_t keylen;
+                const char* key; /* not delivered inline to server, see oop_client_deliver_request() */
+        } POST_PACKED_STRUCTURE property;
+	jack_uuid_t client_id;
 	jack_nframes_t nframes;
 	jack_time_t timeout;
         pid_t cap_pid;

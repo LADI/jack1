@@ -47,16 +47,16 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include <jack/driver.h>
-#include <jack/engine.h>
-#include <jack/types.h>
-#include <jack/internal.h>
 #include <jack/types.h>
 #include <jack/ringbuffer.h>
 #include <jack/thread.h>
 
-#include <../alsa-midi/midi_pack.h>
-#include <../alsa-midi/midi_unpack.h>
+#include "driver.h"
+#include "engine.h"
+#include "internal.h"
+
+#include "../alsa_midi/midi_pack.h"
+#include "../alsa_midi/midi_unpack.h"
 
 // debug print control flags
 #define DEBUG_LEVEL_BUFFERS           	(1<<0)

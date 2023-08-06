@@ -28,9 +28,9 @@
 #include <assert.h>
 
 #include <config.h>
-#include <jack/internal.h>
-#include <jack/engine.h>
-#include <jack/driver.h>
+#include "internal.h"
+#include "engine.h"
+#include "driver.h"
 
 #include "../libjack/local.h"
 
@@ -1446,7 +1446,7 @@ jackctl_port_registration_notify(
 	struct jackctl_client * client_ptr;
 	const char * port_short_name;
 	struct jackctl_port * port_ptr;
-	jack_client_id_t client_id;
+	jack_uuid_t client_id;
 	jack_client_internal_t * client;
 	pid_t pid;
 

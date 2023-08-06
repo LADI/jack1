@@ -23,7 +23,7 @@
 #include <string.h>
 #include <dbus/dbus.h>
 
-#include <jack/internal.h>
+#include "internal.h"
 
 #include "jackcontroller.h"
 #include "jackcontroller_internal.h"

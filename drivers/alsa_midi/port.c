@@ -44,7 +44,7 @@
 
 static
 int
-a2j_alsa_connect_from (struct a2j * self, int client, int port)
+a2j_alsa_connect_from (alsa_midi_driver_t * driver, int client, int port)
 {
 	snd_seq_port_subscribe_t* sub;
 	snd_seq_addr_t seq_addr;
@@ -54,15 +54,15 @@ a2j_alsa_connect_from (struct a2j * self, int client, int port)
 	seq_addr.client = client;
 	seq_addr.port = port;
 	snd_seq_port_subscribe_set_sender (sub, &seq_addr);
-	seq_addr.client = self->client_id;
-	seq_addr.port = self->port_id;
+	seq_addr.client = driver->client_id;
+	seq_addr.port = driver->port_id;
 	snd_seq_port_subscribe_set_dest (sub, &seq_addr);
 
 	snd_seq_port_subscribe_set_time_update (sub, 1);
-	snd_seq_port_subscribe_set_queue (sub, self->queue);
+	snd_seq_port_subscribe_set_queue (sub, driver->queue);
 	snd_seq_port_subscribe_set_time_real (sub, 1);
 
-	if ((err = snd_seq_subscribe_port (self->seq, sub))) {
+	if ((err = snd_seq_subscribe_port (driver->seq, sub))) {
 		a2j_error ("can't subscribe to %d:%d - %s", client, port, snd_strerror(err));
 	}
 
@@ -84,22 +84,22 @@ a2j_port_setdead (a2j_port_hash_t hash, snd_seq_addr_t addr)
 void
 a2j_port_free (struct a2j_port * port)
 {
-	// snd_seq_disconnect_from (self->seq, self->port_id, port->remote.client, port->remote.port);
-	// snd_seq_disconnect_to (self->seq, self->port_id, port->remote.client, port->remote.port);
+	// snd_seq_disconnect_from (driver->seq, driver->port_id, port->remote.client, port->remote.port);
+	// snd_seq_disconnect_to (driver->seq, driver->port_id, port->remote.client, port->remote.port);
 
 	if (port->inbound_events) {
 		jack_ringbuffer_free (port->inbound_events);
 	}
 
-	if (port->jack_port != JACK_INVALID_PORT && !port->a2j_ptr->finishing) {
-		jack_port_unregister (port->a2j_ptr->jack_client, port->jack_port);
+	if (port->jack_port != JACK_INVALID_PORT && !port->driver_ptr->finishing) {
+		jack_port_unregister (port->driver_ptr->jack_client, port->jack_port);
 	}
 
 	free (port);
 }
 
 void
-a2j_port_fill_name (struct a2j_port * port_ptr, int input, snd_seq_client_info_t * client_info_ptr,
+a2j_port_fill_name (struct a2j_port * port_ptr, int dir, snd_seq_client_info_t * client_info_ptr,
 		    const snd_seq_port_info_t * port_info_ptr, bool make_unique)
 {
 	char *c;
@@ -107,16 +107,18 @@ a2j_port_fill_name (struct a2j_port * port_ptr, int input, snd_seq_client_info_t
 	if (make_unique) {
 		snprintf (port_ptr->name,
 			  sizeof(port_ptr->name),
-			  "%s [%d]: %s",
+			  "%s [%d] %s %s",
 			  snd_seq_client_info_get_name(client_info_ptr),
 			  snd_seq_client_info_get_client(client_info_ptr),
-			  snd_seq_port_info_get_name(port_info_ptr));
+			  snd_seq_port_info_get_name(port_info_ptr), 
+                          (dir == A2J_PORT_CAPTURE ? "in" : "out"));
 	} else {
 		snprintf (port_ptr->name,
 			  sizeof(port_ptr->name),
-			  "%s: %s",
+			  "%s %s %s",
 			  snd_seq_client_info_get_name(client_info_ptr),
-			  snd_seq_port_info_get_name(port_info_ptr));
+			  snd_seq_port_info_get_name(port_info_ptr),
+                          (dir == A2J_PORT_CAPTURE ? "in" : "out"));
 	}
 	
 	// replace all offending characters with ' '
@@ -128,7 +130,7 @@ a2j_port_fill_name (struct a2j_port * port_ptr, int input, snd_seq_client_info_t
 }
 
 struct a2j_port *
-a2j_port_create (struct a2j * self, snd_seq_addr_t addr, const snd_seq_port_info_t * info)
+a2j_port_create (alsa_midi_driver_t * driver, int dir, snd_seq_addr_t addr, const snd_seq_port_info_t * info)
 {
 	struct a2j_port *port;
 	int err;
@@ -137,7 +139,7 @@ a2j_port_create (struct a2j * self, snd_seq_addr_t addr, const snd_seq_port_info
 	int jack_caps;
 	struct a2j_stream * stream_ptr;
 
-	stream_ptr = &self->stream;
+	stream_ptr = &driver->stream[dir];
 
 	if ((err = snd_seq_client_info_malloc (&client_info_ptr)) != 0) {
 		a2j_error("Failed to allocate client info");
@@ -146,7 +148,7 @@ a2j_port_create (struct a2j * self, snd_seq_addr_t addr, const snd_seq_port_info
 
 	client = snd_seq_port_info_get_client (info);
 
-	err = snd_seq_get_any_client_info (self->seq, client, client_info_ptr);
+	err = snd_seq_get_any_client_info (driver->seq, client, client_info_ptr);
 	if (err != 0) {
 		a2j_error("Failed to get client info");
 		goto fail_free_client_info;
@@ -160,16 +162,16 @@ a2j_port_create (struct a2j * self, snd_seq_addr_t addr, const snd_seq_port_info
 		goto fail_free_client_info;
 	}
 
-	port->a2j_ptr = self;
+	port->driver_ptr = driver;
 	port->jack_port = JACK_INVALID_PORT;
 	port->remote = addr;
 
-	a2j_port_fill_name (port, self->input, client_info_ptr, info, true);
+	a2j_port_fill_name (port, dir, client_info_ptr, info, false);
 
 	/* Add port to list early, before registering to JACK, so map functionality is guaranteed to work during port registration */
 	list_add_tail (&port->siblings, &stream_ptr->list);
 	
-	if (self->input) {
+	if (dir == A2J_PORT_CAPTURE) {
 		jack_caps = JackPortIsOutput;
 	} else {
 		jack_caps = JackPortIsInput;
@@ -180,26 +182,26 @@ a2j_port_create (struct a2j * self, snd_seq_addr_t addr, const snd_seq_port_info
 		jack_caps |= JackPortIsPhysical|JackPortIsTerminal;
 	}
 
-	port->jack_port = jack_port_register (self->jack_client, port->name, JACK_DEFAULT_MIDI_TYPE, jack_caps, 0);
+	port->jack_port = jack_port_register (driver->jack_client, port->name, JACK_DEFAULT_MIDI_TYPE, jack_caps, 0);
 	if (port->jack_port == JACK_INVALID_PORT) {
 		a2j_error("jack_port_register() failed for '%s'", port->name);
 		goto fail_free_port;
 	}
 
-	if (self->input) {
-		err = a2j_alsa_connect_from(self, port->remote.client, port->remote.port);
+	if (dir == A2J_PORT_CAPTURE) {
+		err = a2j_alsa_connect_from (driver, port->remote.client, port->remote.port);
 	} else {
-		err = snd_seq_connect_to(self->seq, self->port_id, port->remote.client, port->remote.port);
+		err = snd_seq_connect_to (driver->seq, driver->port_id, port->remote.client, port->remote.port);
 	}
 
 	if (err) {
-		a2j_info("port skipped: %s", port->name);
+		a2j_debug("port skipped: %s", port->name);
 		goto fail_free_port;
 	}
 
 	port->inbound_events = jack_ringbuffer_create(MAX_EVENT_SIZE*16);
 
-	a2j_info("port created: %s", port->name);
+	a2j_debug("port created: %s", port->name);
 	return port;
 
   fail_free_port:

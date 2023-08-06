@@ -26,7 +26,7 @@
 #include <assert.h>
 #include <dbus/dbus.h>
 
-#include <jack/internal.h>
+#include "internal.h"
 
 #include "jackdbus.h"
 #include "jackcontroller_internal.h"

@@ -22,7 +22,7 @@
 #define __jack_driver_parse_h__
 
 #include <jack/jslist.h>
-#include <jack/driver_interface.h>
+#include "driver_interface.h"
 
 static void
 jack_print_driver_options (jack_driver_desc_t * desc, FILE *file)

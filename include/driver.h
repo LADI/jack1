@@ -22,8 +22,9 @@
 
 #include <pthread.h>
 #include <jack/types.h>
-#include <jack/port.h>
-#include <jack/driver_interface.h>
+
+#include "port.h"
+#include "driver_interface.h"
 
 typedef float         gain_t;
 typedef unsigned long channel_t;

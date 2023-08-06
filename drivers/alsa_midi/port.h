@@ -19,31 +19,11 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#ifndef PORT_THREAD_H__1C6B5065_5556_4AC6_AA9F_44C32A9648C6__INCLUDED
-#define PORT_THREAD_H__1C6B5065_5556_4AC6_AA9F_44C32A9648C6__INCLUDED
+#ifndef PORT_H__757ADD0F_5E53_41F7_8B7F_8119C5E8A9F1__INCLUDED
+#define PORT_H__757ADD0F_5E53_41F7_8B7F_8119C5E8A9F1__INCLUDED
 
-void
-a2j_update_port(
-  struct a2j * self,
-  snd_seq_addr_t addr,
-  const snd_seq_port_info_t * info);
+struct a2j_port* a2j_port_create (alsa_midi_driver_t* driver, int dir, snd_seq_addr_t addr, const snd_seq_port_info_t * info);
+void a2j_port_setdead (a2j_port_hash_t hash, snd_seq_addr_t addr);
+void a2j_port_free (struct a2j_port * port);
 
-void
-a2j_update_ports(
-  struct a2j * self);
-
-void
-a2j_free_ports(
-  jack_ringbuffer_t * ports);
-
-struct a2j_port *
-a2j_find_port_by_addr(
-  struct a2j_stream * stream_ptr,
-  snd_seq_addr_t addr);
-
-struct a2j_port *
-a2j_find_port_by_jack_port_name(
-  struct a2j_stream * stream_ptr,
-  const char * jack_port);
-
-#endif /* #ifndef PORT_THREAD_H__1C6B5065_5556_4AC6_AA9F_44C32A9648C6__INCLUDED */
+#endif /* #ifndef PORT_H__757ADD0F_5E53_41F7_8B7F_8119C5E8A9F1__INCLUDED */

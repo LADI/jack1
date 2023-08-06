@@ -47,8 +47,9 @@
 #include <sys/sem.h>
 #include <sysdeps/ipc.h>
 
-#include <jack/shm.h>
-#include <jack/internal.h>
+#include "shm.h"
+#include "internal.h"
+#include "version.h"
 
 #ifdef USE_POSIX_SHM
 static jack_shmtype_t jack_shmtype = shm_POSIX;
@@ -401,11 +402,14 @@ jack_register_server (const char *server_name, int new_registry)
 			     JACK_SERVER_NAME_SIZE) != 0)
 			continue;	/* no match */
 
-		if (jack_shm_header->server[i].pid == my_pid)
+		if (jack_shm_header->server[i].pid == my_pid) {
+			jack_shm_unlock_registry ();
 			return 0;	/* it's me */
+		}
 
 		/* see if server still exists */
 		if (kill (jack_shm_header->server[i].pid, 0) == 0) {
+			jack_shm_unlock_registry ();
 			return EEXIST;	/* other server running */
 		}
 
@@ -420,8 +424,10 @@ jack_register_server (const char *server_name, int new_registry)
 			break;
 	}
 
-	if (i >= MAX_SERVERS)
+	if (i >= MAX_SERVERS) {
+		jack_shm_unlock_registry ();
 		return ENOSPC;		/* out of space */
+	}
 
 	/* claim it */
 	jack_shm_header->server[i].pid = my_pid;

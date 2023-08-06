@@ -27,8 +27,8 @@
 #include <expat.h>
 #include <dbus/dbus.h>
 
-#include <jack/driver.h>
-#include <jack/engine.h>
+#include "driver.h"
+#include "engine.h"
 #include "jackcontroller_internal.h"
 #include "jackdbus.h"
 

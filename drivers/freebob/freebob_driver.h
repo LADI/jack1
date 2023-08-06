@@ -60,9 +60,10 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include <jack/driver.h>
-#include <jack/engine.h>
 #include <jack/types.h>
+
+#include "driver.h"
+#include "engine.h"
 
 // debug print control flags
 #define DEBUG_LEVEL_BUFFERS           	(1<<0)
@@ -137,8 +138,8 @@
 
 #ifdef FREEBOB_DRIVER_WITH_JACK_MIDI
 
-#include "../alsa-midi/midi_pack.h"
-#include "../alsa-midi/midi_unpack.h"
+#include "../alsa_midi/midi_pack.h"
+#include "../alsa_midi/midi_unpack.h"
 #include <jack/midiport.h>
 
 typedef struct freebob_midi_input_port_t {
