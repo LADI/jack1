@@ -783,7 +783,6 @@ jackctl_server jackctl_server_create(const char * name)
 		    "clock-source",
 		    "Clock source",
 		    "Select a specific wall clock.\n"
-		    "  'c' - Cycle Counter\n"
 		    "  'h' - HPET timer\n"
 		    "  's' - System timer\n",
 		    JackParamChar,
@@ -1683,10 +1682,6 @@ jackctl_server_start(
 	case 'h':
 		jack_info("Using HPET timer as clock source.");
 		clock_source = JACK_TIMER_HPET;
-		break;
-	case 'c':
-		jack_info("Using Cycle Counter as clock source.");
-		clock_source = JACK_TIMER_CYCLE_COUNTER;
 		break;
 	case 's':
 		jack_info("Using System timer as clock source.");
