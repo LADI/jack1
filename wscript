@@ -6,7 +6,7 @@
 
 import os
 from waflib import Context
-from waflib import Logs, Options, TaskGen
+from waflib import Logs, Options, TaskGen, Utils
 from waflib.Build import BuildContext, CleanContext, InstallContext, UninstallContext
 from waf_toolchain_flags import WafToolchainFlags
 
@@ -391,7 +391,7 @@ def build(bld):
         install_path='${DBUS_SERVICES_DIR}/',
         BINDIR=bld.env['PREFIX'] + '/bin')
 
-    #bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)
+    bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)
 
     driver = bld(
         features=['c', 'cshlib'],
