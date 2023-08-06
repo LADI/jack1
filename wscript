@@ -295,6 +295,7 @@ def build(bld):
 	[
             "jack/intclient.h",
             "jack/jack.h",
+            "jack/systemdeps.h",
             "jack/jslist.h",
             "jack/ringbuffer.h",
             "jack/statistics.h",
@@ -306,6 +307,8 @@ def build(bld):
             "jack/weakmacros.h",
             "jack/weakjack.h",
             "jack/control.h",
+            "jack/metadata.h",
+            "jack/uuid.h",
 	])
 
     # process jack.pc.in -> jack.pc
