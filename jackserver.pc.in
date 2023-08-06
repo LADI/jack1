@@ -7,5 +7,5 @@ jack_implementation=ladi-jack1
 Name: jackserver
 Description: JACK server API
 Version: @JACK_VERSION@
-Libs: -L${libdir} -l@SERVERLIB@
+Libs: -L${libdir} -l@SERVERLIB@ -lm -ldb
 Cflags: -I${includedir}
