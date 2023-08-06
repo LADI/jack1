@@ -429,9 +429,6 @@ int can_pass (size_t sz, jack_ringbuffer_t *in, jack_ringbuffer_t *out)
 	return jack_ringbuffer_read_space (in) >= sz && jack_ringbuffer_write_space (out) >= sz;
 }
 
-static
-void midi_port_init(const alsa_rawmidi_t *midi, midi_port_t *port, snd_rawmidi_info_t *info, const alsa_id_t *id)
-=======
 void midi_port_init (const alsa_rawmidi_t *midi, midi_port_t *port, snd_rawmidi_info_t *info, const alsa_id_t *id, const char * cardstr)
 {
 	char *c;
