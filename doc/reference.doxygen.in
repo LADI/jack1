@@ -31,7 +31,7 @@ PROJECT_NAME           = JACK-AUDIO-CONNECTION-KIT
 # This could be handy for archiving the generated documentation or 
 # if some version control system is used.
 
-PROJECT_NUMBER         = @JACK_VERSION@
+PROJECT_NUMBER         =
 
 # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute) 
 # base path where the generated documentation will be put. 
@@ -516,20 +516,22 @@ WARN_LOGFILE           =
 INPUT                  = @top_srcdir@/doc/mainpage.dox \
                          @top_srcdir@/doc/transport.dox \
                          @top_srcdir@/doc/porting.dox \
-                         @top_srcdir@/example-clients/inprocess.c \
-                         @top_srcdir@/example-clients/simple_client.c \
+                         @top_srcdir@/jack/control.h \
                          @top_srcdir@/jack/intclient.h \
                          @top_srcdir@/jack/jack.h \
+                         @top_srcdir@/jack/jslist.h \
+                         @top_srcdir@/jack/metadata.h \
+                         @top_srcdir@/jack/midiport.h \
                          @top_srcdir@/jack/ringbuffer.h \
+                         @top_srcdir@/jack/session.h \
                          @top_srcdir@/jack/statistics.h \
+                         @top_srcdir@/jack/systemdeps.h \
                          @top_srcdir@/jack/thread.h \
                          @top_srcdir@/jack/transport.h \
                          @top_srcdir@/jack/types.h \
-                         @top_srcdir@/jack/midiport.h \
-                         @top_srcdir@/jack/session.h \
+                         @top_srcdir@/jack/uuid.h \
                          @top_srcdir@/jack/weakjack.h \
-                         @top_srcdir@/jack/control.h \
-                         @top_srcdir@/jack/metadata.h \
+                         @top_srcdir@/jack/weakmacros.h \
 
 # This tag can be used to specify the character encoding of the source files 
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding, which is 
@@ -1369,4 +1371,7 @@ DOT_CLEANUP            = YES
 # The SEARCHENGINE tag specifies whether or not a search engine should be 
 # used. If set to NO the values of all tags below this one will be ignored.
 
-SEARCHENGINE           = NO
+SEARCHENGINE           = YES
+
+# newer stuff
+HTML_DYNAMIC_MENUS     = NO
