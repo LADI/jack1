@@ -277,6 +277,25 @@ def build(bld):
         "libjack/unlock.c",
     ]
 
+    bld.install_files(
+	'${PREFIX}/include/jack',
+	[
+            "jack/intclient.h",
+            "jack/jack.h",
+            "jack/jslist.h",
+            "jack/ringbuffer.h",
+            "jack/statistics.h",
+            "jack/session.h",
+            "jack/thread.h",
+            "jack/timestamps.h",
+            "jack/transport.h",
+            "jack/types.h",
+            "jack/midiport.h",
+            "jack/weakmacros.h",
+            "jack/weakjack.h",
+            "jack/control.h",
+	])
+
     # process jack.pc.in -> jack.pc
     bld(
         features='subst_pc',
