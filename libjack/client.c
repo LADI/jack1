@@ -36,6 +36,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <jack/jack.h>
 #include <jack/jslist.h>
@@ -180,7 +182,7 @@ jack_get_tmpdir ()
 	}
 
 	if (fgets (buf, sizeof (buf), in) == NULL) {
-		fclose (in);
+		pclose (in);
 		free (pathcopy);
 		return -1;
 	}
@@ -189,7 +191,7 @@ jack_get_tmpdir ()
 
 	if (buf[len-1] != '\n') {
 		/* didn't get a whole line */
-		fclose (in);
+		pclose (in);
 		free (pathcopy);
 		return -1;
 	}
@@ -202,7 +204,7 @@ jack_get_tmpdir ()
 	memcpy (jack_tmpdir, buf, len-1);
 	jack_tmpdir[len-1] = '\0';
 	
-	fclose (in);
+	pclose (in);
 	free (pathcopy);
 #endif
 	return 0;
@@ -1020,6 +1022,9 @@ failure:
 int
 start_server (const char *server_name, jack_options_t options)
 {
+        int status;
+        pid_t first_child_pid;
+
 	if ((options & JackNoStartServer)
 	    || getenv("JACK_NO_START_SERVER")) {
 		return 1;
@@ -1034,7 +1039,10 @@ start_server (const char *server_name, jack_options_t options)
 	 * virtual memory tricks, the overhead of the second fork() is
 	 * probably relatively small.
 	 */
-	switch (fork()) {
+
+        first_child_pid = fork();
+
+	switch (first_child_pid) {
 	case 0:				/* child process */
 		switch (fork()) {
 		case 0:			/* grandchild process */
@@ -1048,6 +1056,9 @@ start_server (const char *server_name, jack_options_t options)
 	case -1:			/* fork() error */
 		return 1;		/* failed to start server */
 	}
+
+        /* reap the initaial child */
+        waitpid (first_child_pid, &status, 0);
 
 	/* only the original parent process goes here */
 	return 0;			/* (probably) successful */
