@@ -42,6 +42,9 @@ def options(opt):
     opt.set_auto_options_define('HAVE_%s')
     opt.set_auto_options_style('yesno_and_hack')
 
+    opt.add_option('--libdir', type='string', help='Library directory [Default: <prefix>/lib64]')
+    opt.add_option('--pkgconfigdir', type='string', help='pkg-config file directory [Default: <libdir>/pkgconfig]')
+
     alsa = opt.add_auto_option(
             'alsa',
             help='Enable ALSA driver',
@@ -87,6 +90,16 @@ def configure(conf):
     conf.env['JACK_API_VERSION'] = JACK_API_VERSION
 
     flags = WafToolchainFlags(conf)
+
+    if Options.options.libdir:
+        conf.env['LIBDIR'] = Options.options.libdir
+    else:
+        conf.env['LIBDIR'] = conf.env['PREFIX'] + '/lib64'
+
+    if Options.options.pkgconfigdir:
+        conf.env['PKGCONFDIR'] = Options.options.pkgconfigdir
+    else:
+        conf.env['PKGCONFDIR'] = conf.env['LIBDIR'] + '/pkgconfig'
 
     conf.env['JACK_DRIVER_DIR'] = os.path.normpath(
         os.path.join(conf.env['PREFIX'],
@@ -264,6 +277,17 @@ def build(bld):
         "libjack/unlock.c",
     ]
 
+    # process jack.pc.in -> jack.pc
+    bld(
+        features='subst_pc',
+        source='jack.pc.in',
+        target='jack.pc',
+        install_path='${PKGCONFDIR}',
+        JACK_VERSION=VERSION,
+        INCLUDEDIR=os.path.normpath(bld.env['PREFIX'] + '/include'),
+        CLIENTLIB=clientlib.target,
+    )
+
     serverlib = bld(features=['c', 'cshlib'])
     serverlib.defines = 'HAVE_CONFIG_H'
     serverlib.includes = includes
@@ -291,6 +315,17 @@ def build(bld):
         'libjack/transclient.c',
         'libjack/unlock.c',
     ]
+
+    # process jackserver.pc.in -> jackserver.pc
+    bld(
+        features='subst_pc',
+        source='jackserver.pc.in',
+        target='jackserver.pc',
+        install_path='${PKGCONFDIR}',
+        JACK_VERSION=VERSION,
+        INCLUDEDIR=os.path.normpath(bld.env['PREFIX'] + '/include'),
+        SERVERLIB=serverlib.target,
+    )
 
     obj = bld(features=['c', 'cprogram'])
     obj.defines = ['HAVE_CONFIG_H']
