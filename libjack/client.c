@@ -232,7 +232,7 @@ jack_get_tmpdir ()
 	pclose (in);
 	free (pathcopy);
 #endif
-	return NULL;
+	return DEFAULT_TMP_DIR;
 }
 
 void
