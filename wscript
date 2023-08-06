@@ -404,20 +404,20 @@ def build(bld):
         'drivers/alsa/hdsp.c',
         'drivers/alsa/ice1712.c',
         'drivers/alsa/usx2y.c',
-        'drivers/alsa-midi/alsa_rawmidi.c',
-        'drivers/alsa-midi/alsa_seqmidi.c',
+#        'drivers/am/alsa_rawmidi.c',
+#        'drivers/am/alsa_seqmidi.c',
     ]
 
-    driver = bld(
-        features=['c', 'cshlib'],
-        defines=['HAVE_CONFIG_H'],
-        includes=includes,
-	use = ['ALSA', 'serverlib'],
-        target='alsa_midi',
-        install_path='${JACK_DRIVER_DIR}/')
-    driver.env['cshlib_PATTERN'] = '%s.so'
-    driver.source = [
-        'drivers/alsa-midi/alsa_rawmidi.c',
-        'drivers/alsa-midi/alsa_seqmidi.c',
-        'drivers/alsa-midi/alsa_midi_driver.c',
-    ]
+    # driver = bld(
+    #     features=['c', 'cshlib'],
+    #     defines=['HAVE_CONFIG_H'],
+    #     includes=includes,
+    # 	use = ['ALSA', 'serverlib'],
+    #     target='alsa_midi',
+    #     install_path='${JACK_DRIVER_DIR}/')
+    # driver.env['cshlib_PATTERN'] = '%s.so'
+    # driver.source = [
+    #     'drivers/am/alsa_rawmidi.c',
+    #     'drivers/am/alsa_seqmidi.c',
+    #     'drivers/am/alsa_midi_driver.c',
+    # ]
