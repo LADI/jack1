@@ -426,6 +426,16 @@ def build(bld):
 #        'drivers/am/alsa_seqmidi.c',
     ]
 
+    driver = bld(
+        features=['c', 'cshlib'],
+        defines=['HAVE_CONFIG_H'],
+        includes=includes,
+	use = ['serverlib'],
+        target='oss',
+        install_path='${JACK_DRIVER_DIR}/')
+    driver.env['cshlib_PATTERN'] = '%s.so'
+    driver.source = ['drivers/oss/oss_driver.c']
+
     # driver = bld(
     #     features=['c', 'cshlib'],
     #     defines=['HAVE_CONFIG_H'],
