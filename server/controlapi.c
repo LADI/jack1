@@ -1570,3 +1570,8 @@ jack_port_type_id_t jack_port_type_id (const jack_port_t *port)
 {
 	return port->shared->ptype_id;
 }
+
+int jack_get_client_pid(const char *name)
+{
+	return 0;               /* TODO: */
+}
