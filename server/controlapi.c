@@ -1562,3 +1562,8 @@ const char* jack_get_version_string()
 
     return version_str;
 }
+
+jack_port_type_id_t jack_port_type_id (const jack_port_t *port)
+{
+	return port->shared->ptype_id;
+}
