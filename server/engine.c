@@ -4671,7 +4671,9 @@ jack_port_registration_notify (jack_engine_t *engine,
 		}
 	}
 
-	engine->jackctl_port_registration_notify(engine->jackctl_context, port_id, yn);
+	if (engine->jackctl_port_registration_notify) {
+		engine->jackctl_port_registration_notify(engine->jackctl_context, port_id, yn);
+	}
 }
 
 static void
