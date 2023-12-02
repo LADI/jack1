@@ -32,6 +32,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <assert.h>
 #include <signal.h>
 
@@ -148,6 +149,8 @@ struct jackctl_parameter {
 	jack_driver_param_t * driver_parameter_ptr;
 	jack_driver_param_constraint_desc_t * constraint_ptr;
 };
+
+static struct jackctl_server * g_server_ptr;
 
 static
 struct jackctl_parameter *
@@ -870,6 +873,11 @@ jackctl_server_t * jackctl_server_create (
 	struct jackctl_server * server_ptr;
 	union jackctl_parameter_value value;
 
+	if (g_server_ptr != NULL) {
+		jack_error ("JACK server is singleton");
+		goto fail;
+	}
+
 	server_ptr = (struct jackctl_server*)malloc (sizeof(struct jackctl_server));
 	if (server_ptr == NULL) {
 		jack_error ("Cannot allocate memory for jackctl_server structure.");
@@ -1077,6 +1085,7 @@ jackctl_server_t * jackctl_server_create (
 	/* Allowed to fail */
 	jackctl_internals_load (server_ptr);
 
+	g_server_ptr = server_ptr;
 	return server_ptr;
 
 fail_free_parameters:
@@ -1105,6 +1114,7 @@ const JSList * jackctl_server_get_drivers_list (jackctl_server_t *server_ptr)
 
 bool jackctl_server_stop (jackctl_server_t *server_ptr)
 {
+	assert(g_server_ptr = server_ptr);
 	assert (server_ptr->engine != NULL);
 
 	//jack_engine_driver_exit (server_ptr->engine);
@@ -1514,3 +1524,16 @@ fail_nostart:
 	return false;
 }
 
+void
+jack_log (const char *fmt, ...)
+{
+	va_list ap;
+	char buffer[300];
+
+	if (g_server_ptr == NULL || !g_server_ptr->verbose.b) return;
+
+	va_start (ap, fmt);
+	vsnprintf (buffer, sizeof(buffer), fmt, ap);
+	jack_info_callback (buffer);
+	va_end (ap);
+}
