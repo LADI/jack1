@@ -1,4 +1,4 @@
-// Low-level functions for atomic operations: IA64 version  -*- C++ -*-
+// Low-level functions for atomic operations: IA64 version  -*- C -*-
 
 // Copyright (C) 2000, 2001, 2003 Free Software Foundation, Inc.
 //

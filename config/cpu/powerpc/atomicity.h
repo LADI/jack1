@@ -1,4 +1,4 @@
-// Low-level functions for atomic operations: PowerPC version  -*- C++ -*-
+// Low-level functions for atomic operations: PowerPC version  -*- C -*-
 
 // Copyright (C) 1999, 2000, 2001, 2003 Free Software Foundation, Inc.
 //

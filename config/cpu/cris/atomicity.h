@@ -1,4 +1,4 @@
-// Low-level functions for atomic operations: CRIS version  -*- C++ -*-
+// Low-level functions for atomic operations: CRIS version  -*- C -*-
 
 // Copyright (C) 2001, 2003 Free Software Foundation, Inc.
 //
