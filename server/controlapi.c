@@ -1119,6 +1119,7 @@ bool jackctl_server_stop (jackctl_server_t *server_ptr)
 {
 	assert(g_server_ptr = server_ptr);
 	assert (server_ptr->engine != NULL);
+	assert (server_ptr->driver != NULL);
 
 	//jack_engine_driver_exit (server_ptr->engine);
 	jack_engine_delete (server_ptr->engine);
@@ -1189,6 +1190,8 @@ jackctl_server_close(
 {
 	assert (server_ptr->engine == NULL);
 	assert (server_ptr->driver != NULL);
+	server_ptr->driver = NULL;
+	return true;
 }
 
 bool
