@@ -4,13 +4,14 @@
  */
 
 /**
-@mainpage JACK Audio Connection Kit
+@mainpage (LADI) JACK Audio Connection Kit API Reference
 
 @section intro Introduction
 
+This is documentation of [JACK2](https://web.archive.org/web/20170106162202/http://lac.linuxaudio.org/2009/cdm/Thursday/01_Letz/01.pdf) with [LADI project](https://ladish.org/) modifications.
+
 JACK is a low-latency audio server, written for any operating system
-that is reasonably POSIX compliant. It currently exists for Linux, OS
-X, Solaris, FreeBSD and Windows. It can connect several client
+that is reasonably POSIX compliant. It can connect several client
 applications to an audio device, and allow them to share audio with
 each other.  Clients can run as separate processes like normal
 applications, or within the JACK server as "plugins".
@@ -19,7 +20,8 @@ JACK was designed from the ground up for professional audio work, and
 its design focuses on two key areas: synchronous execution of all
 clients, and low latency operation.
 
-@see <http://jackaudio.org>
+@see [jackdbus.ladish.org](http://jackdbus.ladish.org)
+@see [Upstream jackaudio.org site - jackaudio.org](http://jackaudio.org)
 
 @section jack_overview JACK Overview
 
@@ -38,7 +40,7 @@ JACK changes all this by providing an API that does several things:
     2. allows applications to send and receive audio data to/from
        each other as well as the audio interface. There is no
        difference in how an application sends or receives
-       data regardless of whether it comes from/goes to another application 
+       data regardless of whether it comes from/goes to another application
        or an audio interface.
 
 For programmers with experience of several other audio APIs such as
@@ -87,7 +89,6 @@ little clearer:
  - @ref ClientFunctions
  - @ref ClientCallbacks
  - @ref ClientThreads
- - @ref ServerControl
  - @ref PortFunctions
  - @ref PortSearching
  - @ref LatencyFunctions
@@ -120,49 +121,24 @@ The full API is described in:
   creation for JACK and its clients.
   - @ref midiport.h "<jack/midiport.h>" functions to handle reading
   and writing of MIDI data to a port
-  - @ref session.h "<jack/session.h>" functions that form the JACK
-  session API
   - @ref control.h "<jack/control.h>" the API for starting and
 controlling a JACK server
   - @ref metadata.h "<jack/metadata.h>" the API for managing metadata
 about objects within JACK (clients and ports)
 
 
-In addition, the tools directory provides numerous examples
-of simple JACK clients that nevertheless use the API to do something
-useful.  It includes
-
-  - a metronome.
-  - a recording client that can capture any number of channels
-      from any JACK sources and store them as an audio file.
-  - command line clients to control the transport mechanism,
-       change the buffer size and more.      
-  - commands to load and unload JACK internal clients.
-  - tools for checking the status of a running JACK system.
-
-and many more.
-
-@section porting Porting
-
-JACK is designed to be portable to any system supporting the relevant
-POSIX and ANSI C standards.  It currently runs under GNU/Linux, Mac OS
-X and Berkeley Unix on several different processor architectures.  If
-you want to port JACK to another platform, please read the @ref
-porting-guide document.
-
 @section license License
 
-Copyright (C) 2001-2019 by Paul Davis, Stephane Letz, Jack O'Quinn, Torben Hohn, Filipe Coelho and others.
+Copyright (C) 2001-2023 by Paul Davis, Stephane Letz, Jack O'Quinn, Torben Hohn, Nedko Arnaidov, Filipe Coelho and others.
 
 JACK is free software; you can redistribute it and/or modify it under
 the terms of the GNU GPL and LGPL licenses as published by the Free
 Software Foundation, <http://www.gnu.org>.  The JACK server uses the
 GPL, as noted in the source file headers.  However, the JACK library
 is licensed under the LGPL, allowing proprietary programs to link with
-it and use JACK services.  You should have received a copy of these
-Licenses along with the program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
-USA.
+it and use JACK services.
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 This program is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the implied warranty of
