@@ -150,6 +150,7 @@ def configure(conf):
     conf.define('JACK_SEMAPHORE_KEY', 0x282929)
     conf.define('JACK_DEFAULT_DRIVER', 'dummy')
     conf.define('JACK_VERSION', VERSION)
+    conf.define('LIBDIR', conf.env['LIBDIR'])
     conf.write_config_header('config.h', remove=False)
     flags.flush()
 

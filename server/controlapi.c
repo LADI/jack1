@@ -35,6 +35,7 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <signal.h>
+#include <sys/stat.h>
 
 #include "jack/jslist.h"
 #include "jack/control.h"
@@ -43,6 +44,8 @@
 #include "driver.h"
 #include "engine.h"
 #include "clientengine.h"
+
+#include "version.h"
 
 //#include "JackError.h"
 //#include "JackServer.h"
@@ -1536,4 +1539,26 @@ jack_log (const char *fmt, ...)
 	vsnprintf (buffer, sizeof(buffer), fmt, ap);
 	jack_info_callback (buffer);
 	va_end (ap);
+}
+
+#define JACK_VERSION_STR JACK_VERSION " built from " GIT_VERSION " built on "
+#define JACK_VERSION_FULL_STR JACK_VERSION_STR "0123456789" "0123456789" "012345"
+
+const char* jack_get_version_string()
+{
+    struct stat st;
+    static char version_str[] = JACK_VERSION_FULL_STR;
+    static char * timestamp_str = NULL;
+
+    if (timestamp_str == NULL)
+    {
+        timestamp_str = version_str + sizeof(JACK_VERSION_STR) - 1;
+
+        st.st_mtime = 0;
+        stat(LIBDIR "/libjackserver.so.0", &st);
+        ctime_r(&st.st_mtime, timestamp_str);
+        timestamp_str[24] = 0;
+    }
+
+    return version_str;
 }
