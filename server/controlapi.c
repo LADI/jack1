@@ -393,16 +393,12 @@ jack_drivers_load ()
 
 	while ( (dir_entry = readdir (dir_stream)) ) {
 		/* check the filename is of the right format */
-		if (strncmp ("jack_", dir_entry->d_name, 5) != 0) {
-			continue;
-		}
-
 		ptr = strrchr (dir_entry->d_name, '.');
 		if (!ptr) {
 			continue;
 		}
 		ptr++;
-		if (strncmp ("so", ptr, 2) != 0) {
+		if (strcmp ("so", ptr) != 0) {
 			continue;
 		}
 
