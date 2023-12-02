@@ -1,4 +1,4 @@
-// u/* -*- Mode: C++ ; c-basic-offset: 4 -*- */
+// u/* -*- Mode: C ; c-basic-offset: 4 -*- */
 /*
    JACK control API implementation
 
