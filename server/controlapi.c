@@ -2,7 +2,7 @@
 /*
    JACK control API implementation
 
-   Copyright (C) 2008 Nedko Arnaudov
+   Copyright (C) 2008-2023 Nedko Arnaudov
    Copyright (C) 2008 Grame
 
    This program is free software; you can redistribute it and/or modify
@@ -664,6 +664,13 @@ void jackctl_wait_signals (sigset_t signals)
 
 #else
 
+struct jackctl_sigmask
+{
+    sigset_t signals;
+};
+
+static struct jackctl_sigmask g_signals;
+
 static
 void
 do_nothing_handler (int sig)
@@ -677,11 +684,10 @@ do_nothing_handler (int sig)
 	snprintf (buf, sizeof(buf), "received signal %d during shutdown (ignored)\n", sig);
 }
 
-sigset_t
-jackctl_setup_signals (
-	unsigned int flags)
+jackctl_sigmask_t *
+jackctl_setup_signals(
+    unsigned int flags)
 {
-	sigset_t signals;
 	sigset_t allsignals;
 	struct sigaction action;
 	int i;
@@ -720,20 +726,20 @@ jackctl_setup_signals (
 	   after a return from sigwait().
 	 */
 
-	sigemptyset (&signals);
-	sigaddset (&signals, SIGHUP);
-	sigaddset (&signals, SIGINT);
-	sigaddset (&signals, SIGQUIT);
-	sigaddset (&signals, SIGPIPE);
-	sigaddset (&signals, SIGTERM);
-	sigaddset (&signals, SIGUSR1);
-	sigaddset (&signals, SIGUSR2);
+	sigemptyset (&g_signals.signals);
+	sigaddset (&g_signals.signals, SIGHUP);
+	sigaddset (&g_signals.signals, SIGINT);
+	sigaddset (&g_signals.signals, SIGQUIT);
+	sigaddset (&g_signals.signals, SIGPIPE);
+	sigaddset (&g_signals.signals, SIGTERM);
+	sigaddset (&g_signals.signals, SIGUSR1);
+	sigaddset (&g_signals.signals, SIGUSR2);
 
 	/* all child threads will inherit this mask unless they
 	 * explicitly reset it
 	 */
 
-	pthread_sigmask (SIG_BLOCK, &signals, 0);
+	pthread_sigmask (SIG_BLOCK, &g_signals.signals, 0);
 
 	/* install a do-nothing handler because otherwise pthreads
 	   behaviour is undefined when we enter sigwait.
@@ -745,25 +751,28 @@ jackctl_setup_signals (
 	action.sa_flags = SA_RESTART | SA_RESETHAND;
 
 	for (i = 1; i < NSIG; i++) {
-		if (sigismember (&signals, i)) {
+		if (sigismember (&g_signals.signals, i)) {
 			sigaction (i, &action, 0);
 		}
 	}
 
-	return signals;
+	return &g_signals;
 }
 
 void
-jackctl_wait_signals (sigset_t signals)
+jackctl_wait_signals(
+    jackctl_sigmask_t * sigmask)
 {
 	int sig;
 	bool waiting = true;
 
+	assert(sigmask == &g_signals); // singleton
+
 	while (waiting) {
     #if defined(sun) && !defined(__sun__) // SUN compiler only, to check
-		sigwait (&signals);
+		sigwait (&g_signals.signals);
     #else
-		sigwait (&signals, &sig);
+		sigwait (&g_signals.signals, &sig);
     #endif
 		fprintf (stderr, "jack main caught signal %d\n", sig);
 
@@ -787,8 +796,14 @@ jackctl_wait_signals (sigset_t signals)
 		// unblock signals so we can see them during shutdown.
 		// this will help prod developers not to lose sight of
 		// bugs that cause segfaults etc. during shutdown.
-		sigprocmask (SIG_UNBLOCK, &signals, 0);
+		sigprocmask (SIG_UNBLOCK, &g_signals.signals, 0);
 	}
+}
+
+void
+jackctl_finish_signals(
+	jackctl_sigmask_t * signals __attribute__((unused)))
+{
 }
 #endif
 
