@@ -64,6 +64,7 @@ struct jackctl_server {
 	JSList * parameters;
 
 	jack_engine_t * engine;
+	jackctl_driver_t * driver;
 
 	/* string, server name */
 	union jackctl_parameter_value name;
@@ -879,6 +880,7 @@ jackctl_server_t * jackctl_server_create (
 	server_ptr->internals = NULL;
 	server_ptr->parameters = NULL;
 	server_ptr->engine = NULL;
+	server_ptr->driver = NULL;
 
 	strcpy (value.str, jack_default_server_name () );
 	if (jackctl_add_parameter (
@@ -1088,6 +1090,8 @@ fail:
 
 void jackctl_server_destroy (jackctl_server_t *server_ptr)
 {
+	assert (server_ptr->engine == NULL);
+	assert (server_ptr->driver == NULL);
 	jackctl_server_free_drivers (server_ptr);
 	jackctl_server_free_internals (server_ptr);
 	jackctl_server_free_parameters (server_ptr);
@@ -1101,6 +1105,8 @@ const JSList * jackctl_server_get_drivers_list (jackctl_server_t *server_ptr)
 
 bool jackctl_server_stop (jackctl_server_t *server_ptr)
 {
+	assert (server_ptr->engine != NULL);
+
 	//jack_engine_driver_exit (server_ptr->engine);
 	jack_engine_delete (server_ptr->engine);
 
@@ -1128,28 +1134,23 @@ const JSList * jackctl_server_get_parameters (jackctl_server_t *server_ptr)
 }
 
 bool
-jackctl_server_start (
+jackctl_server_open (
 	jackctl_server_t *server_ptr,
 	jackctl_driver_t *driver_ptr)
 {
 	int rc;
-	sigset_t oldsignals;
-
-
-	// TODO:
-	int frame_time_offset = 0;
 
 	rc = jack_register_server (server_ptr->name.str, server_ptr->replace_registry.b);
 	switch (rc) {
 	case EEXIST:
 		jack_error ("`%s' server already active", server_ptr->name.str);
-		goto fail;
+		return false;
 	case ENOSPC:
 		jack_error ("too many servers already active");
-		goto fail;
+		return false;
 	case ENOMEM:
 		jack_error ("no access to shm registry");
-		goto fail;
+		return false;
 	}
 
 	//jack_log("server `%s' registered", server_ptr->name.str);
@@ -1163,6 +1164,35 @@ jackctl_server_start (
 		server_ptr->client_timeout.i = 500; /* 0.5 sec; usable when non realtime. */
 
 	}
+
+	server_ptr->driver = driver_ptr;
+
+	return true;
+}
+
+bool
+jackctl_server_close(
+	jackctl_server_t * server_ptr)
+{
+	assert (server_ptr->engine == NULL);
+	assert (server_ptr->driver != NULL);
+}
+
+bool
+jackctl_server_start(
+    jackctl_server_t * server_ptr)
+{
+	sigset_t oldsignals;
+	jackctl_driver_t * driver_ptr;
+
+	// TODO:
+	int frame_time_offset = 0;
+
+	assert (server_ptr->engine == NULL);
+
+	driver_ptr = server_ptr->driver;
+	assert (driver_ptr != NULL);
+
 	oldsignals = jackctl_block_signals ();
 
 	if ((server_ptr->engine = jack_engine_new (server_ptr->realtime.b, server_ptr->realtime_priority.i,
@@ -1171,43 +1201,28 @@ jackctl_server_start (
 						   server_ptr->port_max.i, getpid (), frame_time_offset,
 						   server_ptr->nozombies.b, server_ptr->timothres.ui, drivers)) == 0) {
 		jack_error ("cannot create engine");
-		goto fail_unregister;
+		goto fail;
 	}
 
 	if (jack_engine_load_driver (server_ptr->engine, driver_ptr->desc_ptr, driver_ptr->set_parameters)) {
 		jack_error ("cannot load driver module %s", driver_ptr->desc_ptr->name);
-		goto fail_delete;
+		goto fail_delete_engine;
 	}
 
 	if (server_ptr->engine->driver->start (server_ptr->engine->driver) != 0) {
 		jack_error ("cannot start driver");
-		goto fail_close;
+		goto fail_delete_engine;
 	}
 
 	jackctl_unblock_signals ( oldsignals );
+
 	return true;
 
-fail_close:
-
-fail_delete:
+fail_delete_engine:
 	jack_engine_delete (server_ptr->engine);
 	server_ptr->engine = NULL;
-
-fail_unregister:
-	//jack_log("cleaning up shared memory");
-
-	jack_cleanup_shm ();
-
-	//jack_log("cleaning up files");
-
-	jack_cleanup_files (server_ptr->name.str);
-
-	//jack_log("unregistering server `%s'", server_ptr->name.str);
-
-	jack_unregister_server (server_ptr->name.str);
-	jackctl_unblock_signals ( oldsignals );
-
 fail:
+	jackctl_unblock_signals ( oldsignals );
 	return false;
 }
 
