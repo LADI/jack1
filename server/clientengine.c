@@ -532,7 +532,7 @@ jack_generate_unique_name (jack_engine_t *engine, char *name)
 }
 
 static int
-jack_client_name_invalid (jack_engine_t *engine, char *name,
+jack_client_name_invalid (jack_engine_t *engine, const char *name,
 			  jack_options_t options, jack_status_t *status)
 {
 	/* Since this is always called from the server thread, no
@@ -547,17 +547,21 @@ jack_client_name_invalid (jack_engine_t *engine, char *name,
 
 		*status |= JackNameNotUnique;
 
+#if 0
 		if (options & JackUseExactName) {
+#endif
 			jack_error ("cannot create new client; %s already"
 				    " exists", name);
 			*status |= JackFailure;
 			return TRUE;
+#if 0
 		}
 
 		if (jack_generate_unique_name (engine, name)) {
 			*status |= JackFailure;
 			return TRUE;
 		}
+#endif
 	}
 
 	return FALSE;
@@ -697,7 +701,7 @@ jack_ensure_uuid_unique (jack_engine_t *engine, jack_uuid_t uuid)
 
 /* set up all types of clients */
 static jack_client_internal_t *
-setup_client (jack_engine_t *engine, ClientType type, char *name,
+setup_client (jack_engine_t *engine, ClientType type, const char *name,
 	      jack_uuid_t uuid,
 	      jack_options_t options, jack_status_t *status, int client_fd,
 	      const char *object_path, const char *object_data)

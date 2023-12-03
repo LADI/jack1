@@ -812,13 +812,17 @@ jack_port_type (const jack_port_t *port)
 	return port->type_info->type_name;
 }
 
+static
+int
+jack_port_set_name_internal (jack_port_t *port, const char *new_name);
+
 int
 jack_port_rename (jack_client_t* client, jack_port_t *port, const char *new_name)
 {
 	int ret;
 	char* old_name = strdup (port->shared->name);
 
-	if ((ret = jack_port_set_name (port, new_name)) == 0) {
+	if ((ret = jack_port_set_name_internal (port, new_name)) == 0) {
 
 		/* tell server about name change */
 		jack_request_t req;
@@ -836,8 +840,10 @@ jack_port_rename (jack_client_t* client, jack_port_t *port, const char *new_name
 
 	return ret;
 }
+
+static
 int
-jack_port_set_name (jack_port_t *port, const char *new_name)
+jack_port_set_name_internal (jack_port_t *port, const char *new_name)
 {
 	char *colon;
 	int len;

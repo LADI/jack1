@@ -488,7 +488,7 @@ jack_client_fix_port_buffers (jack_client_t *client)
 }
 
 int
-jack_client_handle_port_connection (jack_client_t *client, jack_event_t *event)
+jack_client_handle_port_connection (jack_client_t *client, const jack_event_t *event)
 {
 	jack_port_t *control_port;
 	jack_port_t *other = 0;
@@ -630,7 +630,7 @@ jack_port_recalculate_latency (jack_port_t *port, jack_latency_callback_mode_t m
 }
 
 int
-jack_client_handle_latency_callback (jack_client_t *client, jack_event_t *event, int is_driver)
+jack_client_handle_latency_callback (jack_client_t *client, const jack_event_t *event, int is_driver)
 {
 	jack_latency_callback_mode_t mode = (event->x.n == 0) ? JackCaptureLatency : JackPlaybackLatency;
 	JSList *node;
@@ -1714,8 +1714,9 @@ jack_session_event_free (jack_session_event_t *event)
 	free (event);
 }
 
+static
 void
-jack_session_commands_free (jack_session_command_t *cmds)
+jack_session_commands_free_internal (jack_session_command_t *cmds)
 {
 	int i = 0;
 
@@ -1736,6 +1737,12 @@ jack_session_commands_free (jack_session_command_t *cmds)
 	}
 
 	free (cmds);
+}
+
+void
+jack_session_commands_free (jack_session_command_t *cmds)
+{
+	jack_session_commands_free_internal(cmds);
 }
 
 jack_session_command_t *
@@ -1821,7 +1828,7 @@ jack_session_notify (jack_client_t* client, const char *target, jack_session_eve
 	return retval;
 out:
 	if ( retval ) {
-		jack_session_commands_free (retval);
+		jack_session_commands_free_internal (retval);
 	}
 	return NULL;
 }

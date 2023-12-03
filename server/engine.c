@@ -2936,7 +2936,7 @@ jack_deliver_event (jack_engine_t *engine, jack_client_internal_t *client,
 		    const jack_event_t *event, ...)
 {
 	va_list ap;
-	char status = 0;
+	signed char status = 0;
 	char* key = 0;
 	size_t keylen = 0;
 

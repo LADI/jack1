@@ -1554,7 +1554,7 @@ jack_log (const char *fmt, ...)
 #define JACK_VERSION_STR JACK_VERSION " built from " GIT_VERSION " built on "
 #define JACK_VERSION_FULL_STR JACK_VERSION_STR "0123456789" "0123456789" "012345"
 
-const char* jack_get_version_string()
+const char* jack_get_version_string(void)
 {
     struct stat st;
     static char version_str[] = JACK_VERSION_FULL_STR;
