@@ -2,6 +2,7 @@
 /*
     Copyright (C) 2001-2003 Paul Davis
     Copyright (C) 2005 Jussi Laako
+    Copyright (C) 2023 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -1494,14 +1495,24 @@ fail:
 	return NULL;
 }
 
-jack_client_t* jack_client_open (const char* ext_client_name, jack_options_t options, jack_status_t* status, ...)
+/* server/clientengine.c */
+#if defined(LIBJACKSERVER)
+jack_client_t *
+jack_create_intclient(const char *name);
+#endif
+
+jack_client_t* jack_client_open (const char* client_name, jack_options_t options, jack_status_t* status, ...)
 {
+#if defined(LIBJACKSERVER)
+	return jack_create_intclient(client_name);
+#else
 	va_list ap;
 
 	va_start (ap, status);
-	jack_client_t* res = jack_client_open_aux (ext_client_name, options, status, ap);
+	jack_client_t* res = jack_client_open_aux (client_name, options, status, ap);
 	va_end (ap);
 	return res;
+#endif
 }
 
 jack_client_t *

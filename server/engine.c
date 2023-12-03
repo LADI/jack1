@@ -2,6 +2,7 @@
 /*
     Copyright (C) 2001-2003 Paul Davis
     Copyright (C) 2004 Jack O'Quin
+    Copyright (C) 2023 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -1792,9 +1793,6 @@ jack_engine_new (int realtime, int rtpriority, int do_mlock, int do_unlock,
 #endif  /* USE_MLOCK */
 	}
 
-	/* start a thread to display messages from realtime threads */
-	jack_messagebuffer_init ();
-
 	jack_init_time ();
 
 	/* allocate the engine, zero the structure to ease debugging */
@@ -2618,8 +2616,6 @@ jack_engine_delete (jack_engine_t *engine)
 	VERBOSE (engine, "max usecs: %.3f, engine deleted", engine->max_usecs);
 
 	free (engine);
-
-	jack_messagebuffer_exit ();
 }
 
 void
@@ -3220,7 +3216,11 @@ jack_rechain_graph (jack_engine_t *engine)
 
 		next = jack_slist_next (node);
 
-		if (!client->control->process_cbset && !client->control->thread_cb_cbset) {
+		VERBOSE (engine, "+++ client %s active=%d",
+			 client->control->name, client->control->active);
+		if (!client->control->process_cbset &&
+		    !client->control->thread_cb_cbset &&
+		    client->control->type != ClientPreloaded) {
 			continue;
 		}
 

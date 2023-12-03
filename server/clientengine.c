@@ -4,6 +4,7 @@
  *
  *  Copyright (C) 2001-2003 Paul Davis
  *  Copyright (C) 2004 Jack O'Quin
+ *  Copyright (C) 2023 Nedko Arnaudov
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -820,6 +821,28 @@ jack_create_driver_client (jack_engine_t *engine, char *name)
 	pthread_mutex_unlock (&engine->request_lock);
 
 	return client;
+}
+
+extern jack_engine_t * g_engine;
+
+jack_client_t *
+jack_create_intclient (const char *name)
+{
+	jack_status_t status;
+	jack_client_internal_t *client;
+	jack_uuid_t empty_uuid = JACK_UUID_EMPTY_INITIALIZER;
+
+	VALGRIND_MEMSET (&empty_uuid, 0, sizeof(empty_uuid));
+
+	jack_uuid_clear (&empty_uuid);
+
+	pthread_mutex_lock (&g_engine->request_lock);
+	client = setup_client (g_engine, ClientPreloaded,
+			       name, empty_uuid, JackUseExactName,
+			       &status, -1, NULL, NULL);
+	pthread_mutex_unlock (&g_engine->request_lock);
+
+	return client->private_client;
 }
 
 static jack_status_t

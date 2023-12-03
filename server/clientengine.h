@@ -3,6 +3,7 @@
  *
  *  Copyright (C) 2001-2003 Paul Davis
  *  Copyright (C) 2004 Jack O'Quin
+ *  Copyright (C) 2023 Nedko Arnaudov
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License as
@@ -24,7 +25,8 @@ static inline int
 jack_client_is_internal (jack_client_internal_t *client)
 {
 	return (client->control->type == ClientInternal) ||
-	       (client->control->type == ClientDriver);
+	       (client->control->type == ClientDriver) ||
+		client->control->type == ClientPreloaded;
 }
 
 static inline char *

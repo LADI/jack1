@@ -282,7 +282,7 @@ def build(bld):
     )
 
     serverlib = bld(features=['c', 'cshlib'])
-    serverlib.defines = 'HAVE_CONFIG_H'
+    serverlib.defines = ['HAVE_CONFIG_H', 'LIBJACKSERVER']
     serverlib.includes = includes
     serverlib.target = 'jackserver'
     serverlib.vnum = bld.env['JACK_API_VERSION']

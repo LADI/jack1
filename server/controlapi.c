@@ -759,6 +759,9 @@ jackctl_setup_signals(
 		}
 	}
 
+	/* start a thread to display messages from realtime threads */
+	jack_messagebuffer_init ();
+
 	return &g_signals;
 }
 
@@ -807,6 +810,7 @@ void
 jackctl_finish_signals(
 	jackctl_sigmask_t * signals __attribute__((unused)))
 {
+	jack_messagebuffer_exit ();
 }
 #endif
 
@@ -864,6 +868,8 @@ get_realtime_priority_constraint ()
 	return NULL;
 #endif
 }
+
+jack_engine_t * g_engine = NULL;
 
 jackctl_server_t * jackctl_server_create (
 	bool (* on_device_acquire)(const char * device_name),
@@ -1119,17 +1125,18 @@ bool jackctl_server_stop (jackctl_server_t *server_ptr)
 
 	//jack_engine_driver_exit (server_ptr->engine);
 	jack_engine_delete (server_ptr->engine);
+	g_engine = NULL;
 
 	/* clean up shared memory and files from this server instance */
-	//jack_log("cleaning up shared memory");
+	jack_log("cleaning up shared memory");
 
 	jack_cleanup_shm ();
 
-	//jack_log("cleaning up files");
+	jack_log("cleaning up files");
 
 	jack_cleanup_files (server_ptr->name.str);
 
-	//jack_log("unregistering server `%s'", server_ptr->name.str);
+	jack_log("unregistering server `%s'", server_ptr->name.str);
 
 	jack_unregister_server (server_ptr->name.str);
 
@@ -1163,7 +1170,7 @@ jackctl_server_open (
 		return false;
 	}
 
-	//jack_log("server `%s' registered", server_ptr->name.str);
+	jack_log("server `%s' registered", server_ptr->name.str);
 
 	/* clean up shared memory and files from any previous
 	 * instance of this server name */
@@ -1225,6 +1232,8 @@ jackctl_server_start(
 		jack_error ("cannot start driver");
 		goto fail_delete_engine;
 	}
+
+	g_engine = server_ptr->engine;
 
 	jackctl_unblock_signals ( oldsignals );
 
@@ -1534,8 +1543,10 @@ jack_log (const char *fmt, ...)
 
 	if (g_server_ptr == NULL || !g_server_ptr->verbose.b) return;
 
+	buffer[0] = 'V';
+	buffer[1] = ':';
 	va_start (ap, fmt);
-	vsnprintf (buffer, sizeof(buffer), fmt, ap);
+	vsnprintf (buffer + 2, sizeof(buffer) - 2, fmt, ap);
 	jack_info_callback (buffer);
 	va_end (ap);
 }

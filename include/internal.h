@@ -6,6 +6,7 @@
     JACK_PROTOCOL_VERSION in configure.in.
 
     Copyright (C) 2001-2003 Paul Davis
+    Copyright (C) 2023 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -235,9 +236,10 @@ typedef struct {
 } POST_PACKED_STRUCTURE jack_event_t;
 
 typedef enum {
-	ClientInternal, /* connect request just names .so */
-	ClientDriver,   /* code is loaded along with driver */
-	ClientExternal  /* client is in another process */
+	ClientInternal,  /* connect request just names .so */
+	ClientDriver,    /* code is loaded along with driver */
+	ClientExternal,  /* client is in another process */
+	ClientPreloaded, /* client code is preloaded in the same process of libjackserver.so */
 } ClientType;
 
 typedef enum {
