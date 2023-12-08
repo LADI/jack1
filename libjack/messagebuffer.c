@@ -8,6 +8,7 @@
 
 /*
  *  Copyright (C) 2004 Rui Nuno Capela, Steve Harris
+ *  Copyright (C) 2023 Nedko Arnaudov
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU Lesser General Public License as published by
@@ -96,7 +97,8 @@ mb_thread_func (void *arg)
 void
 jack_messagebuffer_init ()
 {
-	if (mb_initialized) {
+	if (mb_initialized > 0) {
+		mb_initialized++;
 		return;
 	}
 
@@ -115,6 +117,11 @@ void
 jack_messagebuffer_exit ()
 {
 	if (!mb_initialized) {
+		return;
+	}
+
+	if (mb_initialized > 1) {
+		mb_initialized--;
 		return;
 	}
 
@@ -142,15 +149,17 @@ jack_messagebuffer_add (const char *fmt, ...)
 	char msg[MB_BUFFERSIZE];
 	va_list ap;
 
+	msg[0] = 'V';
+	msg[1] = ':';
 	/* format the message first, to reduce lock contention */
 	va_start (ap, fmt);
-	vsnprintf (msg, MB_BUFFERSIZE, fmt, ap);
+	vsnprintf (msg+2, MB_BUFFERSIZE-2, fmt, ap);
 	va_end (ap);
 
 	if (!mb_initialized) {
 		/* Unable to print message with realtime safety.
 		 * Complain and print it anyway. */
-		fprintf (stderr, "ERROR: messagebuffer not initialized: %s",
+		fprintf (stderr, "ERROR: messagebuffer not initialized: %s\n",
 			 msg);
 		return;
 	}

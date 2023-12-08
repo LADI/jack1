@@ -1,9 +1,6 @@
 [submodule "jack"]
 	path = jack
 	url = ../jack-headers.git
-[submodule "jack_control"]
-	path = jack_control
-	url = ../jack_control
 [submodule "waf-toolchain-flags"]
 	path = waf_toolchain_flags
 	url = ../waf-toolchain-flags

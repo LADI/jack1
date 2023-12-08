@@ -6,6 +6,7 @@
     JACK_PROTOCOL_VERSION in configure.in.
 
     Copyright (C) 2001-2003 Paul Davis
+    Copyright (C) 2023 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -235,9 +236,10 @@ typedef struct {
 } POST_PACKED_STRUCTURE jack_event_t;
 
 typedef enum {
-	ClientInternal, /* connect request just names .so */
-	ClientDriver,   /* code is loaded along with driver */
-	ClientExternal  /* client is in another process */
+	ClientInternal,  /* connect request just names .so */
+	ClientDriver,    /* code is loaded along with driver */
+	ClientExternal,  /* client is in another process */
+	ClientPreloaded, /* client code is preloaded in the same process of libjackserver.so */
 } ClientType;
 
 typedef enum {
@@ -248,29 +250,29 @@ typedef enum {
 } jack_client_state_t;
 
 /* JACK client shared memory data structure. */
-typedef volatile struct {
+typedef struct {
 
 	jack_uuid_t uuid;                       /* w: engine r: engine and client */
-	volatile jack_client_state_t state;     /* w: engine and client r: engine */
-	volatile char name[JACK_CLIENT_NAME_SIZE];
-	volatile char session_command[JACK_PORT_NAME_SIZE];
-	volatile jack_session_flags_t session_flags;
-	volatile ClientType type;               /* w: engine r: engine and client */
-	volatile int8_t active;                 /* w: engine r: engine and client */
-	volatile int8_t dead;                   /* r/w: engine */
-	volatile int8_t timed_out;              /* r/w: engine */
-	volatile int8_t is_timebase;            /* w: engine, r: engine and client */
-	volatile int8_t timebase_new;           /* w: engine and client, r: engine */
-	volatile int8_t is_slowsync;            /* w: engine, r: engine and client */
-	volatile int8_t active_slowsync;        /* w: engine, r: engine and client */
-	volatile int8_t sync_poll;              /* w: engine and client, r: engine */
-	volatile int8_t sync_new;               /* w: engine and client, r: engine */
-	volatile pid_t pid;                     /* w: client r: engine; client pid */
-	volatile pid_t pgrp;                    /* w: client r: engine; client pgrp */
-	volatile uint64_t signalled_at;
-	volatile uint64_t awake_at;
-	volatile uint64_t finished_at;
-	volatile int32_t last_status;        /* w: client, r: engine and client */
+	jack_client_state_t state;     /* w: engine and client r: engine */
+	char name[JACK_CLIENT_NAME_SIZE];
+	char session_command[JACK_PORT_NAME_SIZE];
+	jack_session_flags_t session_flags;
+	ClientType type;               /* w: engine r: engine and client */
+	int8_t active;                 /* w: engine r: engine and client */
+	int8_t dead;                   /* r/w: engine */
+	int8_t timed_out;              /* r/w: engine */
+	int8_t is_timebase;            /* w: engine, r: engine and client */
+	int8_t timebase_new;           /* w: engine and client, r: engine */
+	int8_t is_slowsync;            /* w: engine, r: engine and client */
+	int8_t active_slowsync;        /* w: engine, r: engine and client */
+	int8_t sync_poll;              /* w: engine and client, r: engine */
+	int8_t sync_new;               /* w: engine and client, r: engine */
+	pid_t pid;                     /* w: client r: engine; client pid */
+	pid_t pgrp;                    /* w: client r: engine; client pgrp */
+	uint64_t signalled_at;
+	uint64_t awake_at;
+	uint64_t finished_at;
+	int32_t last_status;        /* w: client, r: engine and client */
 
 	/* indicators for whether callbacks have been set for this client.
 	   We do not include ptrs to the callbacks here (or their arguments)
@@ -279,23 +281,23 @@ typedef volatile struct {
 	   local structure which is part of the libjack compiled for
 	   either 32 bit or 64 bit clients.
 	 */
-	volatile uint8_t process_cbset;
-	volatile uint8_t thread_init_cbset;
-	volatile uint8_t bufsize_cbset;
-	volatile uint8_t srate_cbset;
-	volatile uint8_t port_register_cbset;
-	volatile uint8_t port_connect_cbset;
-	volatile uint8_t graph_order_cbset;
-	volatile uint8_t xrun_cbset;
-	volatile uint8_t sync_cb_cbset;
-	volatile uint8_t timebase_cb_cbset;
-	volatile uint8_t freewheel_cb_cbset;
-	volatile uint8_t client_register_cbset;
-	volatile uint8_t thread_cb_cbset;
-	volatile uint8_t session_cbset;
-	volatile uint8_t latency_cbset;
-	volatile uint8_t property_cbset;
-	volatile uint8_t port_rename_cbset;
+	uint8_t process_cbset;
+	uint8_t thread_init_cbset;
+	uint8_t bufsize_cbset;
+	uint8_t srate_cbset;
+	uint8_t port_register_cbset;
+	uint8_t port_connect_cbset;
+	uint8_t graph_order_cbset;
+	uint8_t xrun_cbset;
+	uint8_t sync_cb_cbset;
+	uint8_t timebase_cb_cbset;
+	uint8_t freewheel_cb_cbset;
+	uint8_t client_register_cbset;
+	uint8_t thread_cb_cbset;
+	uint8_t session_cbset;
+	uint8_t latency_cbset;
+	uint8_t property_cbset;
+	uint8_t port_rename_cbset;
 
 } POST_PACKED_STRUCTURE jack_client_control_t;
 
@@ -500,7 +502,7 @@ typedef struct _jack_thread_arg {
 } jack_thread_arg_t;
 
 extern int  jack_client_handle_port_connection(jack_client_t *client,
-					       jack_event_t *event);
+					       const jack_event_t *event);
 extern jack_client_t *jack_driver_client_new(jack_engine_t *,
 					     const char *client_name);
 extern jack_client_t *jack_client_alloc_internal(jack_client_control_t*,
@@ -546,7 +548,7 @@ extern int jack_port_name_equals(jack_port_shared_t* port, const char* target);
  */
 extern size_t jack_midi_internal_event_size();
 
-extern int jack_client_handle_latency_callback(jack_client_t *client, jack_event_t *event, int is_driver);
+extern int jack_client_handle_latency_callback(jack_client_t *client, const jack_event_t *event, int is_driver);
 
 #ifdef __GNUC__
 #  define likely(x)     __builtin_expect ((x), 1)

@@ -14,8 +14,8 @@ from waf_toolchain_flags import WafToolchainFlags
 
 APPNAME = 'LADI JACK'
 JACK_VERSION_MAJOR = 1
-JACK_VERSION_MINOR = 121
-JACK_VERSION_PATCH = 4
+JACK_VERSION_MINOR = 126
+JACK_VERSION_PATCH = 2
 JACK_API_REVISION=28
 
 VERSION = str(JACK_VERSION_MAJOR) + '.' + str(JACK_VERSION_MINOR) + '.' + str(JACK_VERSION_PATCH)
@@ -69,13 +69,6 @@ def options(opt):
         default=False,
     )
 
-    opt.add_option(
-        '--enable-pkg-config-dbus-service-dir',
-        action='store_true',
-        default=False,
-        help='force D-Bus service install dir to be one returned by pkg-config',
-    )
-
     db = opt.add_auto_option(
             'db',
             help='Use Berkeley DB (metadata)')
@@ -120,27 +113,6 @@ def configure(conf):
     conf.define('JACK_DRIVER_DIR', conf.env['JACK_DRIVER_DIR'])
     conf.define('JACK_INTERNAL_DIR', conf.env['JACK_INTERNAL_DIR'])
 
-    if not conf.check_cfg(package='dbus-1 >= 1.0.0', args='--cflags --libs', mandatory=False):
-        print(
-            Logs.colors.RED + 'ERROR !! jackdbus will not be built because libdbus-dev is missing' + Logs.colors.NORMAL
-        )
-        return
-
-    dbus_dir = conf.check_cfg(package='dbus-1', args='--variable=session_bus_services_dir')
-    if not dbus_dir:
-        print(
-            Logs.colors.RED + 'ERROR !! jackdbus will not be built because service dir is unknown' + Logs.colors.NORMAL
-        )
-        return
-
-    dbus_dir = dbus_dir.strip()
-    conf.env['DBUS_SERVICES_DIR_REAL'] = dbus_dir
-
-    if Options.options.enable_pkg_config_dbus_service_dir:
-        conf.env['DBUS_SERVICES_DIR'] = dbus_dir
-    else:
-        conf.env['DBUS_SERVICES_DIR'] = os.path.normpath(conf.env['PREFIX'] + '/share/dbus-1/services')
-
     conf.check_cfg(package='expat', args='--cflags --libs')
     conf.env['LIB_M'] = ['m']
 
@@ -178,6 +150,7 @@ def configure(conf):
     conf.define('JACK_SEMAPHORE_KEY', 0x282929)
     conf.define('JACK_DEFAULT_DRIVER', 'dummy')
     conf.define('JACK_VERSION', VERSION)
+    conf.define('LIBDIR', conf.env['LIBDIR'])
     conf.write_config_header('config.h', remove=False)
     flags.flush()
 
@@ -197,22 +170,6 @@ def configure(conf):
     conf.msg('Drivers directory', conf.env['JACK_DRIVER_DIR'], color='CYAN')
     conf.msg('Internal clients directory', conf.env['JACK_INTERNAL_DIR'], color='CYAN')
 
-    conf.msg('D-Bus service install directory', conf.env['DBUS_SERVICES_DIR'], color='CYAN')
-
-    if conf.env['DBUS_SERVICES_DIR'] != conf.env['DBUS_SERVICES_DIR_REAL']:
-        print()
-        print(Logs.colors.RED + 'WARNING: D-Bus session services directory as reported by pkg-config is')
-        print(Logs.colors.RED + 'WARNING:', end=' ')
-        print(Logs.colors.CYAN + conf.env['DBUS_SERVICES_DIR_REAL'])
-        print(Logs.colors.RED + 'WARNING: but service file will be installed in')
-        print(Logs.colors.RED + 'WARNING:', end=' ')
-        print(Logs.colors.CYAN + conf.env['DBUS_SERVICES_DIR'])
-        print(
-            Logs.colors.RED + 'WARNING: You may need to adjust your D-Bus configuration after installing jackdbus'
-            )
-        print('WARNING: You can override dbus service install directory')
-        print('WARNING: with --enable-pkg-config-dbus-service-dir option to this script')
-        print(Logs.colors.NORMAL)
     display_feature(conf, 'Build debuggable binaries', conf.env['BUILD_DEBUG'])
 
     tool_flags = [
@@ -325,7 +282,7 @@ def build(bld):
     )
 
     serverlib = bld(features=['c', 'cshlib'])
-    serverlib.defines = 'HAVE_CONFIG_H'
+    serverlib.defines = ['HAVE_CONFIG_H', 'LIBJACKSERVER']
     serverlib.includes = includes
     serverlib.target = 'jackserver'
     serverlib.vnum = bld.env['JACK_API_VERSION']
@@ -365,38 +322,6 @@ def build(bld):
         INCLUDEDIR=os.path.normpath(bld.env['PREFIX'] + '/include'),
         SERVERLIB=serverlib.target,
     )
-
-    obj = bld(features=['c', 'cprogram'])
-    obj.defines = ['HAVE_CONFIG_H']
-    obj.use = ['DBUS-1', 'EXPAT', 'M', 'jackserver']
-    obj.includes = includes
-    obj.source = [
-        'server/engine.c',
-        'server/clientengine.c',
-        'server/transengine.c',
-        'server/jackdbus.c',
-        'server/jackctl.c',
-        'server/jackcontroller.c',
-        'server/jackcontroller_iface_introspectable.c',
-        'server/jackcontroller_iface_control.c',
-        'server/jackcontroller_iface_configure.c',
-        'server/jackcontroller_iface_patchbay.c',
-        'server/jackcontroller_iface_transport.c',
-        'server/jackcontroller_xml_expat.c',
-        'server/jackcontroller_xml.c',
-        'server/jackcontroller_xml_write_raw.c',
-        ]
-    obj.target = 'jackdbus'
-
-    # process org.jackaudio.service.in -> org.jackaudio.service
-    obj = bld(
-        features='subst',
-        source='server/org.jackaudio.service.in',
-        target='org.jackaudio.service',
-        install_path='${DBUS_SERVICES_DIR}/',
-        BINDIR=bld.env['PREFIX'] + '/bin')
-
-    bld.install_as('${PREFIX}/bin/' + "jack_control", 'jack_control/jack_control.py', chmod=Utils.O755)
 
     driver = bld(
         features=['c', 'cshlib'],

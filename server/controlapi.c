@@ -2,7 +2,7 @@
 /*
    JACK control API implementation
 
-   Copyright (C) 2008 Nedko Arnaudov
+   Copyright (C) 2008-2023 Nedko Arnaudov
    Copyright (C) 2008 Grame
 
    This program is free software; you can redistribute it and/or modify
@@ -32,8 +32,10 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <assert.h>
 #include <signal.h>
+#include <sys/stat.h>
 
 #include "jack/jslist.h"
 #include "jack/control.h"
@@ -42,6 +44,8 @@
 #include "driver.h"
 #include "engine.h"
 #include "clientengine.h"
+
+#include "version.h"
 
 //#include "JackError.h"
 //#include "JackServer.h"
@@ -64,6 +68,7 @@ struct jackctl_server {
 	JSList * parameters;
 
 	jack_engine_t * engine;
+	jackctl_driver_t * driver;
 
 	/* string, server name */
 	union jackctl_parameter_value name;
@@ -147,6 +152,8 @@ struct jackctl_parameter {
 	jack_driver_param_t * driver_parameter_ptr;
 	jack_driver_param_constraint_desc_t * constraint_ptr;
 };
+
+static struct jackctl_server * g_server_ptr;
 
 static
 struct jackctl_parameter *
@@ -386,16 +393,12 @@ jack_drivers_load ()
 
 	while ( (dir_entry = readdir (dir_stream)) ) {
 		/* check the filename is of the right format */
-		if (strncmp ("jack_", dir_entry->d_name, 5) != 0) {
-			continue;
-		}
-
 		ptr = strrchr (dir_entry->d_name, '.');
 		if (!ptr) {
 			continue;
 		}
 		ptr++;
-		if (strncmp ("so", ptr, 2) != 0) {
+		if (strcmp ("so", ptr) != 0) {
 			continue;
 		}
 
@@ -664,6 +667,13 @@ void jackctl_wait_signals (sigset_t signals)
 
 #else
 
+struct jackctl_sigmask
+{
+    sigset_t signals;
+};
+
+static struct jackctl_sigmask g_signals;
+
 static
 void
 do_nothing_handler (int sig)
@@ -677,11 +687,10 @@ do_nothing_handler (int sig)
 	snprintf (buf, sizeof(buf), "received signal %d during shutdown (ignored)\n", sig);
 }
 
-sigset_t
-jackctl_setup_signals (
-	unsigned int flags)
+jackctl_sigmask_t *
+jackctl_setup_signals(
+    unsigned int flags)
 {
-	sigset_t signals;
 	sigset_t allsignals;
 	struct sigaction action;
 	int i;
@@ -720,20 +729,20 @@ jackctl_setup_signals (
 	   after a return from sigwait().
 	 */
 
-	sigemptyset (&signals);
-	sigaddset (&signals, SIGHUP);
-	sigaddset (&signals, SIGINT);
-	sigaddset (&signals, SIGQUIT);
-	sigaddset (&signals, SIGPIPE);
-	sigaddset (&signals, SIGTERM);
-	sigaddset (&signals, SIGUSR1);
-	sigaddset (&signals, SIGUSR2);
+	sigemptyset (&g_signals.signals);
+	sigaddset (&g_signals.signals, SIGHUP);
+	sigaddset (&g_signals.signals, SIGINT);
+	sigaddset (&g_signals.signals, SIGQUIT);
+	sigaddset (&g_signals.signals, SIGPIPE);
+	sigaddset (&g_signals.signals, SIGTERM);
+	sigaddset (&g_signals.signals, SIGUSR1);
+	sigaddset (&g_signals.signals, SIGUSR2);
 
 	/* all child threads will inherit this mask unless they
 	 * explicitly reset it
 	 */
 
-	pthread_sigmask (SIG_BLOCK, &signals, 0);
+	pthread_sigmask (SIG_BLOCK, &g_signals.signals, 0);
 
 	/* install a do-nothing handler because otherwise pthreads
 	   behaviour is undefined when we enter sigwait.
@@ -745,25 +754,31 @@ jackctl_setup_signals (
 	action.sa_flags = SA_RESTART | SA_RESETHAND;
 
 	for (i = 1; i < NSIG; i++) {
-		if (sigismember (&signals, i)) {
+		if (sigismember (&g_signals.signals, i)) {
 			sigaction (i, &action, 0);
 		}
 	}
 
-	return signals;
+	/* start a thread to display messages from realtime threads */
+	jack_messagebuffer_init ();
+
+	return &g_signals;
 }
 
 void
-jackctl_wait_signals (sigset_t signals)
+jackctl_wait_signals(
+    jackctl_sigmask_t * sigmask)
 {
 	int sig;
 	bool waiting = true;
 
+	assert(sigmask == &g_signals); // singleton
+
 	while (waiting) {
     #if defined(sun) && !defined(__sun__) // SUN compiler only, to check
-		sigwait (&signals);
+		sigwait (&g_signals.signals);
     #else
-		sigwait (&signals, &sig);
+		sigwait (&g_signals.signals, &sig);
     #endif
 		fprintf (stderr, "jack main caught signal %d\n", sig);
 
@@ -787,8 +802,15 @@ jackctl_wait_signals (sigset_t signals)
 		// unblock signals so we can see them during shutdown.
 		// this will help prod developers not to lose sight of
 		// bugs that cause segfaults etc. during shutdown.
-		sigprocmask (SIG_UNBLOCK, &signals, 0);
+		sigprocmask (SIG_UNBLOCK, &g_signals.signals, 0);
 	}
+}
+
+void
+jackctl_finish_signals(
+	jackctl_sigmask_t * signals __attribute__((unused)))
+{
+	jack_messagebuffer_exit ();
 }
 #endif
 
@@ -847,12 +869,19 @@ get_realtime_priority_constraint ()
 #endif
 }
 
+jack_engine_t * g_engine = NULL;
+
 jackctl_server_t * jackctl_server_create (
 	bool (* on_device_acquire)(const char * device_name),
 	void (* on_device_release)(const char * device_name))
 {
 	struct jackctl_server * server_ptr;
 	union jackctl_parameter_value value;
+
+	if (g_server_ptr != NULL) {
+		jack_error ("JACK server is singleton");
+		goto fail;
+	}
 
 	server_ptr = (struct jackctl_server*)malloc (sizeof(struct jackctl_server));
 	if (server_ptr == NULL) {
@@ -864,6 +893,7 @@ jackctl_server_t * jackctl_server_create (
 	server_ptr->internals = NULL;
 	server_ptr->parameters = NULL;
 	server_ptr->engine = NULL;
+	server_ptr->driver = NULL;
 
 	strcpy (value.str, jack_default_server_name () );
 	if (jackctl_add_parameter (
@@ -1060,6 +1090,7 @@ jackctl_server_t * jackctl_server_create (
 	/* Allowed to fail */
 	jackctl_internals_load (server_ptr);
 
+	g_server_ptr = server_ptr;
 	return server_ptr;
 
 fail_free_parameters:
@@ -1073,6 +1104,8 @@ fail:
 
 void jackctl_server_destroy (jackctl_server_t *server_ptr)
 {
+	assert (server_ptr->engine == NULL);
+	assert (server_ptr->driver == NULL);
 	jackctl_server_free_drivers (server_ptr);
 	jackctl_server_free_internals (server_ptr);
 	jackctl_server_free_parameters (server_ptr);
@@ -1086,19 +1119,24 @@ const JSList * jackctl_server_get_drivers_list (jackctl_server_t *server_ptr)
 
 bool jackctl_server_stop (jackctl_server_t *server_ptr)
 {
+	assert(g_server_ptr = server_ptr);
+	assert (server_ptr->engine != NULL);
+	assert (server_ptr->driver != NULL);
+
 	//jack_engine_driver_exit (server_ptr->engine);
 	jack_engine_delete (server_ptr->engine);
+	g_engine = NULL;
 
 	/* clean up shared memory and files from this server instance */
-	//jack_log("cleaning up shared memory");
+	jack_log("cleaning up shared memory");
 
 	jack_cleanup_shm ();
 
-	//jack_log("cleaning up files");
+	jack_log("cleaning up files");
 
 	jack_cleanup_files (server_ptr->name.str);
 
-	//jack_log("unregistering server `%s'", server_ptr->name.str);
+	jack_log("unregistering server `%s'", server_ptr->name.str);
 
 	jack_unregister_server (server_ptr->name.str);
 
@@ -1113,31 +1151,26 @@ const JSList * jackctl_server_get_parameters (jackctl_server_t *server_ptr)
 }
 
 bool
-jackctl_server_start (
+jackctl_server_open (
 	jackctl_server_t *server_ptr,
 	jackctl_driver_t *driver_ptr)
 {
 	int rc;
-	sigset_t oldsignals;
-
-
-	// TODO:
-	int frame_time_offset = 0;
 
 	rc = jack_register_server (server_ptr->name.str, server_ptr->replace_registry.b);
 	switch (rc) {
 	case EEXIST:
 		jack_error ("`%s' server already active", server_ptr->name.str);
-		goto fail;
+		return false;
 	case ENOSPC:
 		jack_error ("too many servers already active");
-		goto fail;
+		return false;
 	case ENOMEM:
 		jack_error ("no access to shm registry");
-		goto fail;
+		return false;
 	}
 
-	//jack_log("server `%s' registered", server_ptr->name.str);
+	jack_log("server `%s' registered", server_ptr->name.str);
 
 	/* clean up shared memory and files from any previous
 	 * instance of this server name */
@@ -1148,6 +1181,37 @@ jackctl_server_start (
 		server_ptr->client_timeout.i = 500; /* 0.5 sec; usable when non realtime. */
 
 	}
+
+	server_ptr->driver = driver_ptr;
+
+	return true;
+}
+
+bool
+jackctl_server_close(
+	jackctl_server_t * server_ptr)
+{
+	assert (server_ptr->engine == NULL);
+	assert (server_ptr->driver != NULL);
+	server_ptr->driver = NULL;
+	return true;
+}
+
+bool
+jackctl_server_start(
+    jackctl_server_t * server_ptr)
+{
+	sigset_t oldsignals;
+	jackctl_driver_t * driver_ptr;
+
+	// TODO:
+	int frame_time_offset = 0;
+
+	assert (server_ptr->engine == NULL);
+
+	driver_ptr = server_ptr->driver;
+	assert (driver_ptr != NULL);
+
 	oldsignals = jackctl_block_signals ();
 
 	if ((server_ptr->engine = jack_engine_new (server_ptr->realtime.b, server_ptr->realtime_priority.i,
@@ -1156,43 +1220,30 @@ jackctl_server_start (
 						   server_ptr->port_max.i, getpid (), frame_time_offset,
 						   server_ptr->nozombies.b, server_ptr->timothres.ui, drivers)) == 0) {
 		jack_error ("cannot create engine");
-		goto fail_unregister;
+		goto fail;
 	}
 
 	if (jack_engine_load_driver (server_ptr->engine, driver_ptr->desc_ptr, driver_ptr->set_parameters)) {
 		jack_error ("cannot load driver module %s", driver_ptr->desc_ptr->name);
-		goto fail_delete;
+		goto fail_delete_engine;
 	}
 
 	if (server_ptr->engine->driver->start (server_ptr->engine->driver) != 0) {
 		jack_error ("cannot start driver");
-		goto fail_close;
+		goto fail_delete_engine;
 	}
 
+	g_engine = server_ptr->engine;
+
 	jackctl_unblock_signals ( oldsignals );
+
 	return true;
 
-fail_close:
-
-fail_delete:
+fail_delete_engine:
 	jack_engine_delete (server_ptr->engine);
 	server_ptr->engine = NULL;
-
-fail_unregister:
-	//jack_log("cleaning up shared memory");
-
-	jack_cleanup_shm ();
-
-	//jack_log("cleaning up files");
-
-	jack_cleanup_files (server_ptr->name.str);
-
-	//jack_log("unregistering server `%s'", server_ptr->name.str);
-
-	jack_unregister_server (server_ptr->name.str);
-	jackctl_unblock_signals ( oldsignals );
-
 fail:
+	jackctl_unblock_signals ( oldsignals );
 	return false;
 }
 
@@ -1484,3 +1535,50 @@ fail_nostart:
 	return false;
 }
 
+void
+jack_log (const char *fmt, ...)
+{
+	va_list ap;
+	char buffer[300];
+
+	if (g_server_ptr == NULL || !g_server_ptr->verbose.b) return;
+
+	buffer[0] = 'V';
+	buffer[1] = ':';
+	va_start (ap, fmt);
+	vsnprintf (buffer + 2, sizeof(buffer) - 2, fmt, ap);
+	jack_info_callback (buffer);
+	va_end (ap);
+}
+
+#define JACK_VERSION_STR JACK_VERSION " built from " GIT_VERSION " built on "
+#define JACK_VERSION_FULL_STR JACK_VERSION_STR "0123456789" "0123456789" "012345"
+
+const char* jack_get_version_string(void)
+{
+    struct stat st;
+    static char version_str[] = JACK_VERSION_FULL_STR;
+    static char * timestamp_str = NULL;
+
+    if (timestamp_str == NULL)
+    {
+        timestamp_str = version_str + sizeof(JACK_VERSION_STR) - 1;
+
+        st.st_mtime = 0;
+        stat(LIBDIR "/libjackserver.so.0", &st);
+        ctime_r(&st.st_mtime, timestamp_str);
+        timestamp_str[24] = 0;
+    }
+
+    return version_str;
+}
+
+jack_port_type_id_t jack_port_type_id (const jack_port_t *port)
+{
+	return port->shared->ptype_id;
+}
+
+int jack_get_client_pid(const char *name)
+{
+	return 0;               /* TODO: */
+}
