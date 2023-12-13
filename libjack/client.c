@@ -2,6 +2,7 @@
 /*
     Copyright (C) 2001-2003 Paul Davis
     Copyright (C) 2005 Jussi Laako
+    Copyright (C) 2023 Nedko Arnaudov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -487,7 +488,7 @@ jack_client_fix_port_buffers (jack_client_t *client)
 }
 
 int
-jack_client_handle_port_connection (jack_client_t *client, jack_event_t *event)
+jack_client_handle_port_connection (jack_client_t *client, const jack_event_t *event)
 {
 	jack_port_t *control_port;
 	jack_port_t *other = 0;
@@ -629,7 +630,7 @@ jack_port_recalculate_latency (jack_port_t *port, jack_latency_callback_mode_t m
 }
 
 int
-jack_client_handle_latency_callback (jack_client_t *client, jack_event_t *event, int is_driver)
+jack_client_handle_latency_callback (jack_client_t *client, const jack_event_t *event, int is_driver)
 {
 	jack_latency_callback_mode_t mode = (event->x.n == 0) ? JackCaptureLatency : JackPlaybackLatency;
 	JSList *node;
@@ -1494,14 +1495,24 @@ fail:
 	return NULL;
 }
 
-jack_client_t* jack_client_open (const char* ext_client_name, jack_options_t options, jack_status_t* status, ...)
+/* server/clientengine.c */
+#if defined(LIBJACKSERVER)
+jack_client_t *
+jack_create_intclient(const char *name);
+#endif
+
+jack_client_t* jack_client_open (const char* client_name, jack_options_t options, jack_status_t* status, ...)
 {
+#if defined(LIBJACKSERVER)
+	return jack_create_intclient(client_name);
+#else
 	va_list ap;
 
 	va_start (ap, status);
-	jack_client_t* res = jack_client_open_aux (ext_client_name, options, status, ap);
+	jack_client_t* res = jack_client_open_aux (client_name, options, status, ap);
 	va_end (ap);
 	return res;
+#endif
 }
 
 jack_client_t *
@@ -1703,8 +1714,9 @@ jack_session_event_free (jack_session_event_t *event)
 	free (event);
 }
 
+static
 void
-jack_session_commands_free (jack_session_command_t *cmds)
+jack_session_commands_free_internal (jack_session_command_t *cmds)
 {
 	int i = 0;
 
@@ -1725,6 +1737,12 @@ jack_session_commands_free (jack_session_command_t *cmds)
 	}
 
 	free (cmds);
+}
+
+void
+jack_session_commands_free (jack_session_command_t *cmds)
+{
+	jack_session_commands_free_internal(cmds);
 }
 
 jack_session_command_t *
@@ -1810,7 +1828,7 @@ jack_session_notify (jack_client_t* client, const char *target, jack_session_eve
 	return retval;
 out:
 	if ( retval ) {
-		jack_session_commands_free (retval);
+		jack_session_commands_free_internal (retval);
 	}
 	return NULL;
 }

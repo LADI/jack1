@@ -4,6 +4,7 @@
  *
  *  Copyright (C) 2001-2003 Paul Davis
  *  Copyright (C) 2004 Jack O'Quin
+ *  Copyright (C) 2023 Nedko Arnaudov
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -531,7 +532,7 @@ jack_generate_unique_name (jack_engine_t *engine, char *name)
 }
 
 static int
-jack_client_name_invalid (jack_engine_t *engine, char *name,
+jack_client_name_invalid (jack_engine_t *engine, const char *name,
 			  jack_options_t options, jack_status_t *status)
 {
 	/* Since this is always called from the server thread, no
@@ -546,17 +547,21 @@ jack_client_name_invalid (jack_engine_t *engine, char *name,
 
 		*status |= JackNameNotUnique;
 
+#if 0
 		if (options & JackUseExactName) {
+#endif
 			jack_error ("cannot create new client; %s already"
 				    " exists", name);
 			*status |= JackFailure;
 			return TRUE;
+#if 0
 		}
 
 		if (jack_generate_unique_name (engine, name)) {
 			*status |= JackFailure;
 			return TRUE;
 		}
+#endif
 	}
 
 	return FALSE;
@@ -696,7 +701,7 @@ jack_ensure_uuid_unique (jack_engine_t *engine, jack_uuid_t uuid)
 
 /* set up all types of clients */
 static jack_client_internal_t *
-setup_client (jack_engine_t *engine, ClientType type, char *name,
+setup_client (jack_engine_t *engine, ClientType type, const char *name,
 	      jack_uuid_t uuid,
 	      jack_options_t options, jack_status_t *status, int client_fd,
 	      const char *object_path, const char *object_data)
@@ -820,6 +825,28 @@ jack_create_driver_client (jack_engine_t *engine, char *name)
 	pthread_mutex_unlock (&engine->request_lock);
 
 	return client;
+}
+
+extern jack_engine_t * g_engine;
+
+jack_client_t *
+jack_create_intclient (const char *name)
+{
+	jack_status_t status;
+	jack_client_internal_t *client;
+	jack_uuid_t empty_uuid = JACK_UUID_EMPTY_INITIALIZER;
+
+	VALGRIND_MEMSET (&empty_uuid, 0, sizeof(empty_uuid));
+
+	jack_uuid_clear (&empty_uuid);
+
+	pthread_mutex_lock (&g_engine->request_lock);
+	client = setup_client (g_engine, ClientPreloaded,
+			       name, empty_uuid, JackUseExactName,
+			       &status, -1, NULL, NULL);
+	pthread_mutex_unlock (&g_engine->request_lock);
+
+	return client->private_client;
 }
 
 static jack_status_t

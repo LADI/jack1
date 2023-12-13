@@ -14,8 +14,8 @@ from waf_toolchain_flags import WafToolchainFlags
 
 APPNAME = 'LADI JACK'
 JACK_VERSION_MAJOR = 1
-JACK_VERSION_MINOR = 121
-JACK_VERSION_PATCH = 4
+JACK_VERSION_MINOR = 126
+JACK_VERSION_PATCH = 2
 JACK_API_REVISION=28
 
 VERSION = str(JACK_VERSION_MAJOR) + '.' + str(JACK_VERSION_MINOR) + '.' + str(JACK_VERSION_PATCH)
@@ -282,7 +282,7 @@ def build(bld):
     )
 
     serverlib = bld(features=['c', 'cshlib'])
-    serverlib.defines = 'HAVE_CONFIG_H'
+    serverlib.defines = ['HAVE_CONFIG_H', 'LIBJACKSERVER']
     serverlib.includes = includes
     serverlib.target = 'jackserver'
     serverlib.vnum = bld.env['JACK_API_VERSION']
