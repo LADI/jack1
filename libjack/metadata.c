@@ -17,7 +17,9 @@
  */
 
 #include <string.h>
+#if HAVE_DB
 #include <db.h>
+#endif
 #include <limits.h>
 
 #include <jack/metadata.h>
@@ -32,6 +34,8 @@ const char* JACK_METADATA_CONNECTED   = "http://jackaudio.org/metadata/connected
 const char* JACK_METADATA_PORT_GROUP  = "http://jackaudio.org/metadata/port-group";
 const char* JACK_METADATA_ICON_SMALL  = "http://jackaudio.org/metadata/icon-small";
 const char* JACK_METADATA_ICON_LARGE  = "http://jackaudio.org/metadata/icon-large";
+
+#if HAVE_DB
 
 static DB* db = NULL;
 static DB_ENV* db_env = NULL;
@@ -91,6 +95,8 @@ jack_properties_uninit ()
 	}
 }
 
+#endif
+
 void
 jack_free_description (jack_description_t* desc, int free_actual_description_too)
 {
@@ -111,6 +117,7 @@ jack_free_description (jack_description_t* desc, int free_actual_description_too
 	}
 }
 
+#if HAVE_DB
 static int
 jack_property_change_notify (jack_client_t* client, jack_uuid_t uuid, const char* key, jack_property_change_t change)
 {
@@ -148,6 +155,7 @@ make_key_dbt (DBT* dbt, jack_uuid_t subject, const char* key)
 	memcpy (dbt->data + len1, key, len2);   // copy key+null
 }
 
+#endif
 
 int
 jack_set_property (jack_client_t* client,
@@ -156,6 +164,7 @@ jack_set_property (jack_client_t* client,
 		   const char* value,
 		   const char* type)
 {
+#if HAVE_DB
 	DBT d_key;
 	DBT data;
 	int ret;
@@ -228,6 +237,9 @@ jack_set_property (jack_client_t* client,
 	}
 
 	return 0;
+#else
+	return -1;
+#endif
 }
 
 int
@@ -236,6 +248,7 @@ jack_get_property (jack_uuid_t subject,
 		   char**      value,
 		   char**      type)
 {
+#if HAVE_DB
 	DBT d_key;
 	DBT data;
 	int ret;
@@ -308,12 +321,16 @@ jack_get_property (jack_uuid_t subject,
 	}
 
 	return 0;
+#else
+	return -1;
+#endif
 }
 
 int
 jack_get_properties (jack_uuid_t subject,
 		     jack_description_t* desc)
 {
+#if HAVE_DB
 	DBT key;
 	DBT data;
 	DBC* cursor;
@@ -432,11 +449,15 @@ jack_get_properties (jack_uuid_t subject,
 	desc->property_cnt = cnt;
 
 	return cnt;
+#else
+	return -1;
+#endif
 }
 
 int
 jack_get_all_properties (jack_description_t** descriptions)
 {
+#if HAVE_DB
 	DBT key;
 	DBT data;
 	DBC* cursor;
@@ -565,6 +586,9 @@ jack_get_all_properties (jack_description_t** descriptions)
 	(*descriptions) = desc;
 
 	return dcnt;
+#else
+	return -1;
+#endif
 }
 
 
@@ -598,6 +622,7 @@ jack_set_property_change_callback (jack_client_t *client,
 int
 jack_remove_property (jack_client_t* client, jack_uuid_t subject, const char* key)
 {
+#if HAVE_DB
 	DBT d_key;
 	int ret;
 
@@ -621,11 +646,15 @@ jack_remove_property (jack_client_t* client, jack_uuid_t subject, const char* ke
 	}
 
 	return 0;
+#else
+	return -1;
+#endif
 }
 
 int
 jack_remove_properties (jack_client_t* client, jack_uuid_t subject)
 {
+#if HAVE_DB
 	DBT key;
 	DBT data;
 	DBC* cursor;
@@ -699,11 +728,15 @@ jack_remove_properties (jack_client_t* client, jack_uuid_t subject)
 	}
 
 	return cnt;
+#else
+	return -1;
+#endif
 }
 
 int
 jack_remove_all_properties (jack_client_t* client)
 {
+#if HAVE_DB
 	int ret;
 	jack_uuid_t empty_uuid = JACK_UUID_EMPTY_INITIALIZER;
 
@@ -719,4 +752,7 @@ jack_remove_all_properties (jack_client_t* client)
 	jack_property_change_notify (client, empty_uuid, NULL, PropertyDeleted);
 
 	return 0;
+#else
+	return -1;
+#endif
 }
