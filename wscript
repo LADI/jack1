@@ -232,6 +232,7 @@ def build(bld):
     clientlib.target = 'jack'
     clientlib.vnum = bld.env['JACK_API_VERSION']
     clientlib.install_path = '${LIBDIR}'
+    clientlib.use = ['DB']
     clientlib.source = [
         "libjack/client.c",
         "libjack/intclient.c",
