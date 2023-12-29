@@ -232,7 +232,7 @@ def build(bld):
     clientlib.target = 'jack'
     clientlib.vnum = bld.env['JACK_API_VERSION']
     clientlib.install_path = '${LIBDIR}'
-    clientlib.use = ['DB']
+    clientlib.use = ['M', 'DB']
     clientlib.source = [
         "libjack/client.c",
         "libjack/intclient.c",
@@ -288,7 +288,7 @@ def build(bld):
     serverlib.target = 'jackserver'
     serverlib.vnum = bld.env['JACK_API_VERSION']
     serverlib.install_path = '${LIBDIR}'
-    serverlib.use = ['DB']
+    serverlib.use = ['M', 'DB']
     serverlib.source = [
         'server/engine.c',
         'server/clientengine.c',
