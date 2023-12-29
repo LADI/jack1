@@ -7,5 +7,5 @@ jack_implementation=ladi-jack1
 Name: jack
 Description: the Jack Audio Connection Kit: a low-latency synchronous callback-based media server
 Version: @JACK_VERSION@
-Libs: -L${libdir} -l@CLIENTLIB@ -lm -ldb
+Libs: -L${libdir} -l@CLIENTLIB@
 Cflags: -I${includedir}
