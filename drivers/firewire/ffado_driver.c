@@ -50,6 +50,10 @@
 #define SAMPLE_MAX_24BIT  8388608.0f
 #define SAMPLE_MAX_16BIT  32768.0f
 
+#define ALIAS_NAME "firewire_pcm"
+#define ALIAS_MIDI "firewire_midi"
+
+
 static int ffado_driver_stop(ffado_driver_t *driver);
 
 // Basic functionality requires API version 8.  If version 9 or later
@@ -90,11 +94,13 @@ ffado_latency_callback (jack_latency_callback_mode_t mode, void* arg)
 static int
 ffado_driver_attach (ffado_driver_t *driver)
 {
-	char buf[64];
-	char buf2[64];
 	channel_t chn;
 	jack_port_t *port = NULL;
 	int port_flags;
+  char fw_portname[64];
+  char jack_portname[64];
+  char alias[64 + sizeof(ALIAS_NAME) + 100];
+  char alias_midi[64 + sizeof(ALIAS_MIDI) + 100];
 
 	g_verbose = driver->engine->verbose;
 
@@ -161,52 +167,70 @@ ffado_driver_attach (ffado_driver_t *driver)
 	}
 
 	for (chn = 0; chn < driver->capture_nchannels; chn++) {
-		ffado_streaming_get_capture_stream_name (driver->dev, chn, buf, sizeof(buf) - 1);
+    ffado_streaming_get_capture_stream_name (driver->dev, chn, fw_portname, sizeof(fw_portname) - 1);
+
 		driver->capture_channels[chn].stream_type = ffado_streaming_get_capture_stream_type (driver->dev, chn);
 
 		if (driver->capture_channels[chn].stream_type == ffado_stream_type_audio) {
-			snprintf (buf2, 64, "C%d_%s", (int)chn, buf); // needed to avoid duplicate names
-			printMessage ("Registering audio capture port %s", buf2);
-			if ((port = jack_port_register (driver->client, buf2,
+			snprintf (jack_portname, 64, "C%d_%s", (int)chn, fw_portname); // needed to avoid duplicate names
+      // capture port aliases 
+      snprintf(alias, sizeof(alias), ALIAS_NAME ":%s_in", fw_portname);
+			printMessage ("Registering audio capture port %s (%s)", jack_portname, alias);
+			if ((port = jack_port_register (driver->client, jack_portname,
 							JACK_DEFAULT_AUDIO_TYPE,
 							port_flags, 0)) == NULL) {
-				printError (" cannot register port for %s", buf2);
+				printError (" cannot register port for %s", jack_portname);
 				break;
 			}
+    
+      if ( jack_port_set_alias(port, alias)) {
+        printError (" cannot set alias %s for port %s", alias, jack_portname);
+      }
+
 			driver->capture_ports =
 				jack_slist_append (driver->capture_ports, port);
 			// setup port parameters
 			if (ffado_streaming_set_capture_stream_buffer (driver->dev, chn, NULL)) {
-				printError (" cannot configure initial port buffer for %s", buf2);
+				printError (" cannot configure initial port buffer for %s", jack_portname);
 			}
 			if (ffado_streaming_capture_stream_onoff (driver->dev, chn, 1)) {
-				printError (" cannot enable port %s", buf2);
+				printError (" cannot enable port %s", jack_portname);
 			}
 		} else if (driver->capture_channels[chn].stream_type == ffado_stream_type_midi) {
-			snprintf (buf2, 64, "C%d_%s", (int)chn, buf); // needed to avoid duplicate names
-			printMessage ("Registering midi capture port %s", buf2);
-			if ((port = jack_port_register (driver->client, buf2,
+      snprintf (jack_portname, 64, "%s:midi_capture_%d", fw_portname, (int)chn); // needed to avoid duplicate names // TODO make midi port numbering independent from audio ports
+      // capture port aliases 
+      snprintf(alias_midi, sizeof(alias_midi), ALIAS_MIDI ":%s_in", fw_portname);
+ 
+      printMessage ("Registering midi capture port %s (%s)", jack_portname, alias_midi);
+
+      if ((port = jack_port_register (driver->client, jack_portname,
 							JACK_DEFAULT_MIDI_TYPE,
 							port_flags, 0)) == NULL) {
-				printError (" cannot register port for %s", buf2);
+				printError (" cannot register port for %s", jack_portname);
 				break;
 			}
+
+      if ( jack_port_set_alias(port, alias_midi)) {
+        printError (" cannot set alias %s for port %s", alias_midi, jack_portname);
+      }
+
 			driver->capture_ports =
 				jack_slist_append (driver->capture_ports, port);
 			// setup port parameters
 			if (ffado_streaming_set_capture_stream_buffer (driver->dev, chn, NULL)) {
-				printError (" cannot configure initial port buffer for %s", buf2);
+				printError (" cannot configure initial port buffer for %s", jack_portname);
 			}
 			if (ffado_streaming_capture_stream_onoff (driver->dev, chn, 1)) {
-				printError (" cannot enable port %s", buf2);
+				printError (" cannot enable port %s", jack_portname);
 			}
 			// setup midi unpacker
 			midi_unpack_init (&driver->capture_channels[chn].midi_unpack);
 			midi_unpack_reset (&driver->capture_channels[chn].midi_unpack);
 			// setup the midi buffer
 			driver->capture_channels[chn].midi_buffer = calloc (driver->period_size, sizeof(uint32_t));
+
 		} else {
-			printMessage ("Don't register capture port %s", buf);
+			printMessage ("Don't register capture port %s", fw_portname);
 
 			// we have to add a NULL entry in the list to be able to loop over the channels in the read/write routines
 			driver->capture_ports =
@@ -224,53 +248,67 @@ ffado_driver_attach (ffado_driver_t *driver)
 	}
 
 	for (chn = 0; chn < driver->playback_nchannels; chn++) {
-		ffado_streaming_get_playback_stream_name (driver->dev, chn, buf, sizeof(buf) - 1);
+		ffado_streaming_get_playback_stream_name (driver->dev, chn, fw_portname, sizeof(fw_portname) - 1);
 		driver->playback_channels[chn].stream_type = ffado_streaming_get_playback_stream_type (driver->dev, chn);
 
 		if (driver->playback_channels[chn].stream_type == ffado_stream_type_audio) {
-			snprintf (buf2, 64, "P%d_%s", (int)chn, buf); // needed to avoid duplicate names
-			printMessage ("Registering audio playback port %s", buf2);
-			if ((port = jack_port_register (driver->client, buf2,
+			snprintf (jack_portname, 64, "P%d_%s", (int)chn, fw_portname); // needed to avoid duplicate names
+      // capture port aliases 
+      snprintf(alias, sizeof(alias), ALIAS_NAME ":%s_out", fw_portname);
+			printMessage ("Registering audio playback port %s (%s)", jack_portname, alias);
+			if ((port = jack_port_register (driver->client, jack_portname,
 							JACK_DEFAULT_AUDIO_TYPE,
 							port_flags, 0)) == NULL) {
-				printError (" cannot register port for %s", buf2);
+				printError (" cannot register port for %s", jack_portname);
 				break;
 			}
+
+      if ( jack_port_set_alias(port, alias)) {
+        printError (" cannot set alias %s for port %s", alias, jack_portname);
+      }
+
 			driver->playback_ports =
 				jack_slist_append (driver->playback_ports, port);
 
 			// setup port parameters
 			if (ffado_streaming_set_playback_stream_buffer (driver->dev, chn, NULL)) {
-				printError (" cannot configure initial port buffer for %s", buf2);
+				printError (" cannot configure initial port buffer for %s", jack_portname);
 			}
 			if (ffado_streaming_playback_stream_onoff (driver->dev, chn, 1)) {
-				printError (" cannot enable port %s", buf2);
+				printError (" cannot enable port %s", jack_portname);
 			}
 		} else if (driver->playback_channels[chn].stream_type == ffado_stream_type_midi) {
-			snprintf (buf2, 64, "P%d_%s", (int)chn, buf); // needed to avoid duplicate names
-			printMessage ("Registering midi playback port %s", buf2);
-			if ((port = jack_port_register (driver->client, buf2,
+			snprintf (jack_portname, 64, "P%d_%s", (int)chn, fw_portname); // needed to avoid duplicate names // TODO make midi port numbering independent from audio ports
+      snprintf(alias_midi, sizeof(alias_midi), ALIAS_MIDI ":%s_out", fw_portname);
+
+			printMessage ("Registering midi playback port %s (%s)", jack_portname, alias_midi);
+			if ((port = jack_port_register (driver->client, jack_portname,
 							JACK_DEFAULT_MIDI_TYPE,
 							port_flags, 0)) == NULL) {
-				printError (" cannot register port for %s", buf2);
+				printError (" cannot register port for %s", jack_portname);
 				break;
 			}
+
+      if ( jack_port_set_alias(port, alias_midi)) {
+        printError (" cannot set alias %s for port %s", alias_midi, jack_portname);
+      }
+
 			driver->playback_ports =
 				jack_slist_append (driver->playback_ports, port);
 
 			// setup port parameters
 			if (ffado_streaming_set_playback_stream_buffer (driver->dev, chn, NULL)) {
-				printError (" cannot configure initial port buffer for %s", buf2);
+				printError (" cannot configure initial port buffer for %s", jack_portname);
 			}
 			if (ffado_streaming_playback_stream_onoff (driver->dev, chn, 1)) {
-				printError (" cannot enable port %s", buf2);
+				printError (" cannot enable port %s", jack_portname);
 			}
 			// setup midi packer
 			midi_pack_reset (&driver->playback_channels[chn].midi_pack);
 			// setup the midi buffer
 			driver->playback_channels[chn].midi_buffer = calloc (driver->period_size, sizeof(uint32_t));
 		} else {
-			printMessage ("Don't register playback port %s", buf);
+			printMessage ("Don't register playback port %s", fw_portname);
 
 			// we have to add a NULL entry in the list to be able to loop over the channels in the read/write routines
 			driver->playback_ports =
@@ -1038,7 +1076,7 @@ driver_initialize (jack_client_t *client, JSList * params)
 	// temporary
 	cmlparams.device_info = device_name;
 
-	driver = (jack_driver_t*)ffado_driver_new (client, "ffado_pcm", &cmlparams);
+  driver = (jack_driver_t*)ffado_driver_new (client, ALIAS_NAME, &cmlparams);
 
 	return driver;
 }
