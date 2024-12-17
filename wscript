@@ -58,6 +58,7 @@ def options(opt):
     oss = opt.add_auto_option(
             'oss',
             help='Enable OSS driver',
+            default=False,
             conf_dest='BUILD_DRIVER_OSS')
 
     firewire = opt.add_auto_option(
