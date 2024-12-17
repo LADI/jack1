@@ -55,6 +55,11 @@ def options(opt):
             package='alsa >= 1.0.18',
             args='--cflags --libs')
 
+    oss = opt.add_auto_option(
+            'oss',
+            help='Enable OSS driver',
+            conf_dest='BUILD_DRIVER_OSS')
+
     firewire = opt.add_auto_option(
             'firewire',
             help='Enable Firewire (FFADO) driver',
@@ -363,15 +368,16 @@ def build(bld):
 #            'drivers/am/alsa_seqmidi.c',
         ]
 
-    driver = bld(
-        features=['c', 'cshlib'],
-        defines=['HAVE_CONFIG_H'],
-        includes=includes,
-	use = ['serverlib'],
-        target='oss',
-        install_path='${JACK_DRIVER_DIR}/')
-    driver.env['cshlib_PATTERN'] = '%s.so'
-    driver.source = ['drivers/oss/oss_driver.c']
+    if bld.env['BUILD_DRIVER_ALSA']:
+        driver = bld(
+            features=['c', 'cshlib'],
+            defines=['HAVE_CONFIG_H'],
+            includes=includes,
+            use = ['serverlib'],
+            target='oss',
+            install_path='${JACK_DRIVER_DIR}/')
+        driver.env['cshlib_PATTERN'] = '%s.so'
+        driver.source = ['drivers/oss/oss_driver.c']
 
     if bld.env['BUILD_DRIVER_FFADO']:
         driver = bld(
