@@ -55,6 +55,14 @@ def options(opt):
             package='alsa >= 1.0.18',
             args='--cflags --libs')
 
+    firewire = opt.add_auto_option(
+            'firewire',
+            help='Enable Firewire (FFADO) driver',
+            conf_dest='BUILD_DRIVER_FFADO')
+    firewire.check_cfg(
+            package='libffado >= 1.999.17',
+            args='--cflags --libs')
+
     opt.add_auto_option(
         'debug',
         help='Enable debug symbols',
@@ -363,6 +371,17 @@ def build(bld):
         install_path='${JACK_DRIVER_DIR}/')
     driver.env['cshlib_PATTERN'] = '%s.so'
     driver.source = ['drivers/oss/oss_driver.c']
+
+    if bld.env['BUILD_DRIVER_FFADO']:
+        driver = bld(
+            features=['c', 'cshlib'],
+            defines=['HAVE_CONFIG_H'],
+            includes=includes,
+            use = ['LIBFFADO', 'serverlib'],
+            target='firewire',
+            install_path='${JACK_DRIVER_DIR}/')
+        driver.env['cshlib_PATTERN'] = '%s.so'
+        driver.source = ['drivers/firewire/ffado_driver.c']
 
     # driver = bld(
     #     features=['c', 'cshlib'],
