@@ -342,25 +342,26 @@ def build(bld):
     driver.env['cshlib_PATTERN'] = '%s.so'
     driver.source = ['drivers/dummy/dummy_driver.c']
 
-    driver = bld(
-        features=['c', 'cshlib'],
-        defines=['HAVE_CONFIG_H'],
-        includes=includes,
-	use = ['ALSA', 'serverlib'],
-        target='alsa',
-        install_path='${JACK_DRIVER_DIR}/')
-    driver.env['cshlib_PATTERN'] = '%s.so'
-    driver.source = [
-        'drivers/alsa/alsa_driver.c',
-        'drivers/alsa/generic_hw.c',
-        'drivers/alsa/memops.c',
-        'drivers/alsa/hammerfall.c',
-        'drivers/alsa/hdsp.c',
-        'drivers/alsa/ice1712.c',
-        'drivers/alsa/usx2y.c',
-#        'drivers/am/alsa_rawmidi.c',
-#        'drivers/am/alsa_seqmidi.c',
-    ]
+    if bld.env['BUILD_DRIVER_ALSA']:
+        driver = bld(
+            features=['c', 'cshlib'],
+            defines=['HAVE_CONFIG_H'],
+            includes=includes,
+            use = ['ALSA', 'serverlib'],
+            target='alsa',
+            install_path='${JACK_DRIVER_DIR}/')
+        driver.env['cshlib_PATTERN'] = '%s.so'
+        driver.source = [
+            'drivers/alsa/alsa_driver.c',
+            'drivers/alsa/generic_hw.c',
+            'drivers/alsa/memops.c',
+            'drivers/alsa/hammerfall.c',
+            'drivers/alsa/hdsp.c',
+            'drivers/alsa/ice1712.c',
+            'drivers/alsa/usx2y.c',
+#            'drivers/am/alsa_rawmidi.c',
+#            'drivers/am/alsa_seqmidi.c',
+        ]
 
     driver = bld(
         features=['c', 'cshlib'],
